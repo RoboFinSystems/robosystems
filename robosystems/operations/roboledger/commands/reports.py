@@ -27,7 +27,6 @@ from robosystems.models.api.extensions.reports import (
   ShareReportResponse,
   ShareResultItem,
 )
-from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.extensions import (
   Fact,
   PublishList,
@@ -739,16 +738,15 @@ def delete_report(
       f"retiring; deletion is only available for 'draft' or 'under_review'."
     )
 
-  delete_report_fact_sets(session, [report_id])
-  if report_def.origin == "uploaded":
+  if report_def.is_received:
     from robosystems.operations.roboledger.commands.report_import import (
-      remove_report_sections,
-      remove_unused_concepts,
+      delete_received_reports,
     )
 
-    remove_report_sections(session, report_def, acting_user_id)
-    remove_unused_concepts(session, acting_user_id)
-  session.delete(report_def)
+    delete_received_reports(session, [report_id], acting_user_id)
+  else:
+    delete_report_fact_sets(session, [report_id])
+    session.delete(report_def)
   session.commit()
   return True
 
@@ -844,33 +842,15 @@ def share_report(
       "filed_at": report_def.filed_at,
     }
 
-    # FactSets travel as themselves: every recipient read path resolves a
-    # FactSet's Structure, so a flat fact list would be unrenderable.
-    fact_set_rows = source_session.execute(
+    # The company the report states, which the recipient's linked row names.
+    source_entity_id = source_session.execute(
       text("""
-        SELECT fs.id, fs.structure_id, fs.factset_type, fs.period_start,
-               fs.period_end, fs.entity_id
-        FROM fact_sets fs
-        WHERE fs.report_id = :report_id
-        ORDER BY fs.created_at
+        SELECT entity_id FROM fact_sets
+        WHERE report_id = :report_id AND entity_id IS NOT NULL
+        ORDER BY created_at LIMIT 1
       """),
       {"report_id": report_id},
-    ).fetchall()
-    source_fact_sets = [row._asdict() for row in fact_set_rows]
-
-    fact_rows = source_session.execute(
-      text("""
-        SELECT f.id, f.fact_set_id, f.element_id, f.value, f.string_value,
-               f.fact_type, f.value_type, f.content_type, f.decimals,
-               f.period_start, f.period_end, f.period_type, f.unit,
-               f.entity_id, f.created_at
-        FROM facts f
-        JOIN fact_sets fs ON fs.id = f.fact_set_id
-        WHERE fs.report_id = :report_id
-      """),
-      {"report_id": report_id},
-    ).fetchall()
-    source_facts = [row._asdict() for row in fact_rows]
+    ).scalar()
 
     publication_artifacts = _load_publication_artifacts(
       graph_id, report_id, int(report_snapshot["generation_count"])
@@ -880,8 +860,7 @@ def share_report(
       result = _share_to_target(
         source_graph_id=graph_id,
         report_snapshot=report_snapshot,
-        source_fact_sets=source_fact_sets,
-        source_facts=source_facts,
+        source_entity_id=source_entity_id,
         publication_artifacts=publication_artifacts,
         target_graph_id=target_graph_id,
         shared_by=acting_user_id,
@@ -985,6 +964,7 @@ def revoke_report_share(
       source_graph_id=graph_id,
       source_report_id=report_id,
       target_graph_id=body.target_graph_id,
+      removed_by=acting_user_id,
     )
 
     # Stamped in the lock's transaction, after the copy is gone: a failed
@@ -1032,8 +1012,8 @@ def _load_publication_artifacts(
   omits the ``#lineage`` graph by construction, so the books never cross.
 
   Returns the artifacts that resolved, keyed by file extension. A miss is
-  logged and omitted: the row copy is the load-bearing half of a share, so an
-  object-store fault degrades rendering rather than failing the delivery.
+  logged and omitted; the recipient's rows are read from the holon, so a share
+  without one sends nothing.
   """
   from robosystems.db.extensions import extensions_session
 
@@ -1208,14 +1188,22 @@ def delete_report_artifacts(graph_id: str, report_ids: list[str]) -> None:
 
 
 def _delete_copies_in_session(
-  target_session: Session, source_graph_id: str, source_report_id: str
+  target_session: Session,
+  source_graph_id: str,
+  source_report_id: str,
+  removed_by: str,
 ) -> list[str]:
-  """Delete copies of one shared report from an open target session.
+  """Delete copies of one shared report from an open target session, with the
+  sections they brought.
 
   Returns the ids removed, for :func:`delete_report_artifacts` after commit.
   Matches on the provenance pair, so it can never reach a report the target
   authored. Does not commit.
   """
+  from robosystems.operations.roboledger.commands.report_import import (
+    delete_received_reports,
+  )
+
   copy_ids = list(
     target_session.execute(
       select(Report.id).where(
@@ -1229,16 +1217,12 @@ def _delete_copies_in_session(
   if not copy_ids:
     return []
 
-  delete_report_fact_sets(target_session, copy_ids)
-  target_session.execute(
-    text("DELETE FROM reports WHERE id = ANY(:report_ids)"),
-    {"report_ids": copy_ids},
-  )
+  delete_received_reports(target_session, copy_ids, removed_by)
   return copy_ids
 
 
 def _delete_shared_copy(
-  source_graph_id: str, source_report_id: str, target_graph_id: str
+  source_graph_id: str, source_report_id: str, target_graph_id: str, removed_by: str
 ) -> bool:
   """Delete the copy of a shared report from the target tenant schema.
 
@@ -1257,7 +1241,7 @@ def _delete_shared_copy(
 
   with extensions_session(target_graph_id) as target_session:
     deleted = _delete_copies_in_session(
-      target_session, source_graph_id, source_report_id
+      target_session, source_graph_id, source_report_id, removed_by
     )
     target_session.commit()
 
@@ -1268,17 +1252,33 @@ def _delete_shared_copy(
 def _share_to_target(
   source_graph_id: str,
   report_snapshot: dict[str, Any],
-  source_fact_sets: list[dict[str, Any]],
-  source_facts: list[dict[str, Any]],
   target_graph_id: str,
   shared_by: str,
   publication_artifacts: dict[str, str] | None = None,
+  source_entity_id: str | None = None,
 ) -> ShareResultItem:
-  """Copy report definition + FactSets + facts to a target tenant schema."""
+  """Deliver the sender's publication to a target tenant schema.
+
+  The sender's artifacts are stored as the copy's own, and its rows are read
+  from the holon by the same reader a received file goes through, so the
+  sections the sender authored arrive with it.
+  """
   from robosystems.db.extensions import extensions_session, tenant_schema_exists
   from robosystems.db.platform import SessionFactory
   from robosystems.models.core import Graph
   from robosystems.models.core.graph import GraphStatus
+  from robosystems.operations.roboledger.commands.report_import import (
+    ReportImportRefusedError,
+    receive_shared_report,
+  )
+
+  holon_text = (publication_artifacts or {}).get(REPORT_ANCHOR_EXTENSION)
+  if holon_text is None:
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="error",
+      error="The report's holon could not be built, so nothing was sent.",
+    )
 
   try:
     with SessionFactory() as platform_session:
@@ -1342,7 +1342,7 @@ def _share_to_target(
 
       # A re-share replaces the previous copy rather than duplicating it.
       replaced_copy_ids = _delete_copies_in_session(
-        target_session, source_graph_id, report_snapshot["id"]
+        target_session, source_graph_id, report_snapshot["id"], shared_by
       )
 
       shared_report = Report(
@@ -1377,131 +1377,17 @@ def _share_to_target(
         int(report_snapshot.get("generation_count") or 0),
       )
 
-      # Library structures have deterministic UUID5 ids in every tenant, so
-      # they resolve on the far side; tenant-local `struct_*` ones do not, and
-      # their facts fall back to one structure-less set (queryable, not
-      # renderable as a statement).
-      candidate_structure_ids = {
-        fs["structure_id"] for fs in source_fact_sets if fs.get("structure_id")
-      }
-      resolvable_structure_ids: set[str] = set()
-      if candidate_structure_ids:
-        resolvable_structure_ids = {
-          row[0]
-          for row in target_session.execute(
-            text("SELECT id FROM structures WHERE id = ANY(:ids)"),
-            {"ids": list(candidate_structure_ids)},
-          ).fetchall()
-        }
-
-      facts_by_source_set: dict[str, list[dict[str, Any]]] = {}
-      for fact_data in source_facts:
-        facts_by_source_set.setdefault(fact_data["fact_set_id"], []).append(fact_data)
-
-      # The originating ledger is not present in the target graph, so the
-      # shared facts collapse to `asserted` provenance referencing the
-      # source graph/report rather than a re-derivable pivot.
-      def _provenance(source_fact_set_id: str | None) -> AssertedProvenance:
-        basis = f"source_graph={source_graph_id} source_report={report_snapshot['id']}"
-        if source_fact_set_id is not None:
-          basis = f"{basis} source_fact_set={source_fact_set_id}"
-        return AssertedProvenance(
-          source_system="cross_graph_share",
-          asserted_by=shared_by,
-          basis_note=basis,
-        )
-
-      # One target FactSet per source FactSet whose Structure resolves; the
-      # remainder pool into one structure-less set so nothing is dropped.
-      target_set_for_source: dict[str, str] = {}
-      unresolved_facts: list[dict[str, Any]] = []
-      for source_set in source_fact_sets:
-        source_set_id = source_set["id"]
-        set_facts = facts_by_source_set.get(source_set_id, [])
-        if not set_facts:
-          continue
-        structure_id = source_set.get("structure_id")
-        if not structure_id or structure_id not in resolvable_structure_ids:
-          unresolved_facts.extend(set_facts)
-          continue
-        copied_set = create_fact_set(
-          target_session,
-          structure_id=structure_id,
-          period_start=source_set["period_start"],
-          period_end=source_set["period_end"],
-          factset_type=source_set["factset_type"],
-          entity_id=source_set["entity_id"],
-          report_id=shared_report.id,
-          created_by=shared_by,
-          provenance=_provenance(source_set_id),
-        )
-        target_session.flush()
-        target_set_for_source[source_set_id] = str(copied_set.id)
-
-      catch_all_set_id: str | None = None
-      if unresolved_facts:
-        starts = [
-          fd["period_start"]
-          for fd in unresolved_facts
-          if fd.get("period_start") is not None
-        ]
-        ends = [
-          fd["period_end"]
-          for fd in unresolved_facts
-          if fd.get("period_end") is not None
-        ]
-        # `facts.period_end` is NOT NULL, so `ends` is non-empty here.
-        catch_all_set = create_fact_set(
-          target_session,
-          structure_id=None,
-          period_start=min(starts) if starts else None,
-          period_end=max(ends),
-          factset_type="report",
-          entity_id=unresolved_facts[0]["entity_id"],
-          report_id=shared_report.id,
-          created_by=shared_by,
-          provenance=_provenance(None),
-        )
-        target_session.flush()
-        catch_all_set_id = str(catch_all_set.id)
-
-      # Concepts must land before the facts that cite them.
-      _ensure_shared_elements(
-        target_session,
-        source_graph_id,
-        {fd["element_id"] for fd in source_facts if fd.get("element_id")},
-        shared_by,
-        report_taxonomy_id=report_snapshot["taxonomy_id"],
-      )
-
-      for fact_data in source_facts:
-        target_set_id = target_set_for_source.get(
-          fact_data["fact_set_id"], catch_all_set_id
-        )
-        if target_set_id is None:
-          continue
-        rf = Fact(
-          element_id=fact_data["element_id"],
-          value=fact_data["value"],
-          string_value=fact_data["string_value"],
-          fact_type=fact_data["fact_type"],
-          value_type=fact_data["value_type"],
-          content_type=fact_data["content_type"],
-          decimals=fact_data["decimals"],
-          period_start=fact_data["period_start"],
-          period_end=fact_data["period_end"],
-          period_type=fact_data["period_type"],
-          unit=fact_data["unit"],
-          entity_id=fact_data["entity_id"],
-          fact_set_id=target_set_id,
-        )
-        target_session.add(rf)
-
-      source_entity_id = next(
-        (fs["entity_id"] for fs in source_fact_sets if fs.get("entity_id")), None
-      )
-      _ensure_linked_entity(
+      linked_entity_id = _ensure_linked_entity(
         target_session, source_graph_id, shared_by, source_entity_id
+      )
+      # The facts keep the sender's entity id: the graph finds the recipient's
+      # row for the company through it.
+      fact_count = receive_shared_report(
+        target_session,
+        holon_text,
+        report=shared_report,
+        entity_id=source_entity_id or linked_entity_id or "",
+        created_by=shared_by,
       )
 
       # Re-checked: a block committed mid-copy must win, or the recipient's
@@ -1520,9 +1406,16 @@ def _share_to_target(
     return ShareResultItem(
       target_graph_id=target_graph_id,
       status="shared",
-      fact_count=len(source_facts),
+      fact_count=fact_count,
     )
 
+  except ReportImportRefusedError as e:
+    logger.error(f"Failed to read the holon shared to {target_graph_id}: {e}")
+    return ShareResultItem(
+      target_graph_id=target_graph_id,
+      status="error",
+      error="The report's holon could not be read, so nothing was sent.",
+    )
   except Exception as e:
     # Detail stays in the log: the error is about the recipient's schema, and
     # the sender is a different tenant.
@@ -1534,281 +1427,14 @@ def _share_to_target(
     )
 
 
-def _ensure_shared_elements(
-  target_session: Session,
-  source_graph_id: str,
-  element_ids: set[str],
-  shared_by: str,
-  report_taxonomy_id: str | None = None,
-) -> None:
-  """Copy the sender's own concepts into the recipient's schema.
-
-  ``facts.element_id`` has no FK, and one dangling concept makes the
-  recipient's whole next materialization fail. Library concepts resolve by
-  deterministic UUID5 in every tenant; the sender's own reporting-extension
-  ``elem_*`` ids do not, so those taxonomies are copied whole (the self-FK
-  ``parent_id`` points at abstract heads no fact cites).
-
-  ``report_taxonomy_id`` is ensured independently of the facts: it can be
-  missing even when every fact resolves, and ``reports.taxonomy_id`` has no
-  FK either.
-
-  Copies are ``source='linked'``, outside ``COA_SOURCES``, so they never show
-  in the recipient's chart of accounts. Only ``reporting_extension``
-  taxonomies travel; a foreign chart of accounts is never copied.
-
-  Fails closed: a source read failure propagates so the caller rolls back the
-  target instead of writing dangling references.
-  """
-  from robosystems.db.extensions import extensions_session
-  from robosystems.models.extensions import Element, Taxonomy
-
-  missing: set[str] = set()
-  if element_ids:
-    present = {
-      row[0]
-      for row in target_session.execute(
-        text("SELECT id FROM elements WHERE id = ANY(:ids)"),
-        {"ids": list(element_ids)},
-      ).fetchall()
-    }
-    missing = element_ids - present
-
-  report_taxonomy_missing = (
-    bool(report_taxonomy_id)
-    and not target_session.execute(
-      text("SELECT 1 FROM taxonomies WHERE id = :tid"),
-      {"tid": report_taxonomy_id},
-    ).first()
-  )
-
-  if not missing and not report_taxonomy_missing:
-    return
-
-  # Built through the models, not raw INSERT, so Python-side defaults on
-  # NOT NULL columns apply.
-  _TAX_FIELDS = (
-    "id",
-    "name",
-    "description",
-    "taxonomy_type",
-    "version",
-    "standard",
-    "namespace_uri",
-    "parent_taxonomy_id",
-    "extension_type",
-    "effective_date",
-  )
-  _ELEM_FIELDS = (
-    "id",
-    "code",
-    "name",
-    "description",
-    "qname",
-    "namespace",
-    "uri",
-    "balance_type",
-    "period_type",
-    "substitution_group",
-    "is_abstract",
-    "is_monetary",
-    "element_type",
-    "item_type",
-    "taxonomy_id",
-    "parent_id",
-    "depth",
-    "path",
-    "currency",
-    "is_active",
-  )
-
-  with extensions_session(source_graph_id) as source_session:
-    taxonomy_ids: set[str] = set()
-    if missing:
-      taxonomy_ids = {
-        row[0]
-        for row in source_session.execute(
-          text("""
-            SELECT DISTINCT e.taxonomy_id
-            FROM elements e
-            JOIN taxonomies t ON t.id = e.taxonomy_id
-            WHERE e.id = ANY(:ids)
-              AND t.taxonomy_type = 'reporting_extension'
-          """),
-          {"ids": list(missing)},
-        ).fetchall()
-      }
-      if not taxonomy_ids:
-        logger.warning(
-          f"Shared facts from {source_graph_id} cite {len(missing)} concept(s) "
-          "outside any reporting extension; not copied."
-        )
-
-    if report_taxonomy_missing:
-      # Same reporting_extension restriction as the element path.
-      if source_session.execute(
-        text(
-          "SELECT 1 FROM taxonomies "
-          "WHERE id = :tid AND taxonomy_type = 'reporting_extension'"
-        ),
-        {"tid": report_taxonomy_id},
-      ).first():
-        taxonomy_ids.add(str(report_taxonomy_id))
-      else:
-        logger.warning(
-          f"Shared report from {source_graph_id} cites taxonomy "
-          f"{report_taxonomy_id!r}, which the recipient does not have and "
-          "which is not a reporting extension; not copied."
-        )
-
-    if not taxonomy_ids:
-      return
-
-    copy_ids = sorted(taxonomy_ids)
-
-    # Plain dicts: these become new rows in another schema.
-    taxonomies = [
-      ({f: getattr(t, f) for f in _TAX_FIELDS}, dict(t.metadata_ or {}))
-      for t in source_session.execute(select(Taxonomy).where(Taxonomy.id.in_(copy_ids)))
-      .scalars()
-      .all()
-    ]
-    elements = [
-      {f: getattr(e, f) for f in _ELEM_FIELDS}
-      for e in source_session.execute(
-        select(Element).where(Element.taxonomy_id.in_(copy_ids))
-      )
-      .scalars()
-      .all()
-    ]
-
-  existing_taxonomies = {
-    row[0]
-    for row in target_session.execute(
-      text("SELECT id FROM taxonomies WHERE id = ANY(:ids)"),
-      {"ids": [f["id"] for f, _ in taxonomies]},
-    ).fetchall()
-  }
-
-  # Two passes: `parent_taxonomy_id` is a self-FK, so insert parentless first.
-  tax_parents: dict[str, str] = {}
-  for fields, metadata in taxonomies:
-    if fields["id"] in existing_taxonomies:
-      continue
-    parent_id = fields.pop("parent_taxonomy_id")
-    if parent_id:
-      tax_parents[fields["id"]] = parent_id
-    target_session.add(
-      Taxonomy(
-        **fields,
-        parent_taxonomy_id=None,
-        metadata_={**metadata, "source_graph_id": source_graph_id},
-        is_shared=False,
-        is_locked=True,
-        created_by=shared_by,
-      )
-    )
-  target_session.flush()
-
-  # Wire the parents that resolve; leave the rest null rather than fail the
-  # share over a taxonomy the recipient happens not to have.
-  if tax_parents:
-    resolvable_tax = {
-      row[0]
-      for row in target_session.execute(
-        text("SELECT id FROM taxonomies WHERE id = ANY(:ids)"),
-        {"ids": list(set(tax_parents.values()))},
-      ).fetchall()
-    }
-    for child_id, parent_id in tax_parents.items():
-      if parent_id in resolvable_tax:
-        target_session.execute(
-          text("UPDATE taxonomies SET parent_taxonomy_id = :pid WHERE id = :cid"),
-          {"pid": parent_id, "cid": child_id},
-        )
-    target_session.flush()
-
-  element_ids_in = [f["id"] for f in elements]
-  existing_elements = {
-    row[0]
-    for row in target_session.execute(
-      text("SELECT id FROM elements WHERE id = ANY(:ids)"),
-      {"ids": element_ids_in},
-    ).fetchall()
-  }
-  # qname is UNIQUE per tenant; two senders can share a prefix. Skip the
-  # colliding concept rather than fail the share (the materializer's inner
-  # join drops its edge).
-  taken_qnames = {
-    row[0]
-    for row in target_session.execute(
-      text("SELECT qname FROM elements WHERE qname = ANY(:qnames) AND id != ALL(:ids)"),
-      {
-        "qnames": [f["qname"] for f in elements if f["qname"]],
-        "ids": element_ids_in,
-      },
-    ).fetchall()
-  }
-
-  # Two passes for the `parent_id` self-FK (`depth` is always 0, so it cannot
-  # order inserts). Parents outside the copied taxonomies stay null.
-  parents: dict[str, str] = {}
-  skipped_qname = 0
-  for fields in elements:
-    if fields["id"] in existing_elements:
-      continue
-    if fields["qname"] and fields["qname"] in taken_qnames:
-      logger.warning(
-        f"Concept {fields['qname']!r} from {source_graph_id} collides with an "
-        "existing qname in the recipient; skipped."
-      )
-      skipped_qname += 1
-      continue
-    parent_id = fields.pop("parent_id")
-    if parent_id:
-      parents[fields["id"]] = parent_id
-    target_session.add(
-      Element(**fields, parent_id=None, source="linked", created_by=shared_by)
-    )
-  target_session.flush()
-
-  resolvable = {
-    row[0]
-    for row in target_session.execute(
-      text("SELECT id FROM elements WHERE id = ANY(:ids)"),
-      {"ids": list(set(parents.values()))},
-    ).fetchall()
-  }
-  for child_id, parent_id in parents.items():
-    if parent_id in resolvable:
-      target_session.execute(
-        text("UPDATE elements SET parent_id = :pid WHERE id = :cid"),
-        {"pid": parent_id, "cid": child_id},
-      )
-  target_session.flush()
-
-  copied = len(elements) - len(existing_elements) - skipped_qname
-  uncovered = missing - {f["id"] for f in elements}
-  if uncovered:
-    logger.warning(
-      f"{len(uncovered)} concept(s) cited by facts from {source_graph_id} "
-      f"belong to no reporting extension and were not copied: "
-      f"{sorted(uncovered)[:5]}"
-    )
-
-  logger.info(
-    f"Copied {copied} concept(s) in {len(taxonomies)} reporting extension(s) "
-    f"from {source_graph_id} alongside the shared report."
-  )
-
-
 def _ensure_linked_entity(
   target_session: Session,
   source_graph_id: str,
   shared_by: str,
   source_entity_id: str | None = None,
-) -> None:
-  """Upsert a linked Entity for the source company in the target graph.
+) -> str | None:
+  """Upsert a linked Entity for the source company in the target graph, and
+  return its id (``None`` when the source names no company).
 
   The source company is the entity the shared report's facts belong to, else
   the source graph's group parent. The linked row is keyed on the source graph
@@ -1831,7 +1457,7 @@ def _ensure_linked_entity(
         source_entity = find_parent_entity(source_session)
 
       if not source_entity:
-        return
+        return None
       source_entity_id = str(source_entity.id)
       source_parent = find_parent_entity(source_session)
       is_source_parent = (
@@ -1929,3 +1555,4 @@ def _ensure_linked_entity(
     """),
     {"entity_id": entity_id, "source_graph_id": source_graph_id},
   )
+  return entity_id

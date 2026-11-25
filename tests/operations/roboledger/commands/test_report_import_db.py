@@ -385,6 +385,72 @@ def test_a_section_with_no_statement_type_renders_as_a_disclosure(tenant):
   assert package is not None and len(package.items) == 3
 
 
+def test_a_note_of_text_blocks_renders_as_narrative(tenant):
+  """A note whose lines are all text blocks is read by the text-block reader;
+  read as a grid it shows nothing. Its facts are XBRL's escaped HTML."""
+  from robosystems.operations.roboledger.reads.reports import get_report_package
+
+  session = tenant["session"]
+  holon = to_holon(
+    build_report(
+      ReportRows(
+        report_id="pkg-acme-policies",
+        entity=EntityRow(identifier="acme-co", name="Acme Co"),
+        reporting_style="authored-package",
+        period_end=OCT,
+        form="policies",
+        attributed_to="package-reader",
+        namespaces={"acme": "https://example.com/taxonomy/acme/v1/"},
+        concepts=[
+          ConceptRow(qname="acme:PoliciesHead", label="Policies", abstract=True),
+          ConceptRow(
+            qname="acme:RevenuePolicyTextBlock",
+            label="Revenue recognition",
+            kind="text_block",
+            period_type="duration",
+          ),
+        ],
+        sections=[
+          SectionRow(
+            name="Accounting Policies",
+            head="acme:PoliciesHead",
+            lines=[LineRow(concept="acme:RevenuePolicyTextBlock")],
+          )
+        ],
+        facts=[
+          FactRow(
+            concept="acme:RevenuePolicyTextBlock",
+            value="<p>Revenue is recognized when control transfers.</p>",
+            start=OCT_1,
+            end=OCT,
+          )
+        ],
+      )
+    )
+  )
+  result = import_report(
+    session, GRAPH, holon_text=holon, entity_id=ISSUER, created_by="usr_1"
+  )
+
+  structure = session.execute(
+    select(Structure).where(
+      Structure.id.in_(
+        select(FactSet.structure_id).where(FactSet.report_id == result.report_id)
+      )
+    )
+  ).scalar_one()
+  assert (structure.block_type, structure.concept_arrangement) == (
+    "regulatory_disclosure",
+    "text_block",
+  )
+  [item] = get_report_package(session, result.report_id).items
+  assert len(item.block.view.rendering.rows) == 1
+  fact = session.execute(
+    select(Fact).join(FactSet).where(FactSet.report_id == result.report_id)
+  ).scalar_one()
+  assert fact.content_type == "text/html"
+
+
 def test_a_fact_on_two_sections_lands_on_both(tenant):
   """As a report the ledger writes holds it: one row per section, so neither
   section loses the line."""

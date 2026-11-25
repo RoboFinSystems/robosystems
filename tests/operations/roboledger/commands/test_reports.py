@@ -8,7 +8,6 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.extensions import Report as ReportModel
 from robosystems.operations.roboledger.commands.reports import (
   InvalidFilingTransitionError,
@@ -465,193 +464,6 @@ def test_pre_create_report_fact_sets_instant_period_key_no_leading_slash() -> No
   assert fs.provenance["period"] == "2026-03-31"
 
 
-def test_share_to_target_stamps_asserted_provenance() -> None:
-  """The cross-graph share producer stamps `asserted` provenance that
-  back-references the source graph + report (the third producer in the
-  capture triangle)."""
-  graph = MagicMock()
-  graph.schema_extensions = ["roboledger"]
-  platform_session = MagicMock()
-  platform_session.execute.return_value.scalar_one_or_none.return_value = graph
-  platform_cm = MagicMock()
-  platform_cm.__enter__.return_value = platform_session
-
-  target_session = MagicMock()
-  ext_cm = MagicMock()
-  ext_cm.__enter__.return_value = target_session
-
-  captured: dict = {}
-
-  def _capture(_session, **kwargs):
-    captured.update(kwargs)
-    fs = MagicMock()
-    fs.id = "fs_shared"
-    return fs
-
-  # A source FactSet with no Structure exercises the catch-all copy — this
-  # test is about provenance stamping, not structure resolution.
-  source_fact_sets = [
-    {
-      "id": "fs_src_01",
-      "structure_id": None,
-      "factset_type": "report",
-      "period_start": date(2026, 1, 1),
-      "period_end": date(2026, 3, 31),
-      "entity_id": "ent_src",
-    }
-  ]
-  source_facts = [
-    {
-      "fact_set_id": "fs_src_01",
-      "element_id": "e1",
-      "value": 1.0,
-      "string_value": None,
-      "fact_type": "Numeric",
-      "value_type": "inline",
-      "content_type": None,
-      "decimals": None,
-      "period_start": date(2026, 1, 1),
-      "period_end": date(2026, 3, 31),
-      "period_type": "duration",
-      "unit": "USD",
-      "entity_id": "ent_src",
-    }
-  ]
-  report_snapshot = {
-    "id": "rpt_src",
-    "name": "Q1 Report",
-    "taxonomy_id": "tax_1",
-    "period_type": "annual",
-    "comparative": False,
-  }
-
-  from robosystems.operations.roboledger.commands import reports as reports_mod
-
-  with (
-    patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
-    patch("robosystems.db.extensions.tenant_schema_exists", return_value=True),
-    patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
-    patch.object(reports_mod, "create_fact_set", side_effect=_capture),
-    patch.object(reports_mod, "_ensure_linked_entity"),
-    # The recipient's block list is consulted before the copy. This test is
-    # about provenance stamping, so put the target on the permissive side —
-    # a bare MagicMock session would otherwise read as "blocked".
-    patch.object(reports_mod, "is_source_blocked", return_value=False),
-  ):
-    result = _share_to_target(
-      source_graph_id="kg_src",
-      report_snapshot=report_snapshot,
-      source_fact_sets=source_fact_sets,
-      source_facts=source_facts,
-      target_graph_id="kg_tgt",
-      shared_by="usr_share",
-    )
-
-  assert result.status == "shared"
-  prov = captured["provenance"]
-  assert isinstance(prov, AssertedProvenance)
-  assert prov.origin == "asserted"
-  assert prov.source_system == "cross_graph_share"
-  assert "source_graph=kg_src" in prov.basis_note
-  assert "source_report=rpt_src" in prov.basis_note
-
-
-def test_share_to_target_carries_nonnumeric_columns() -> None:
-  """A shared report containing a text-block fact copies the non-numeric
-  columns through — without them the target insert violates the
-  numeric-XOR-nonnumeric CHECK."""
-  from robosystems.models.extensions import Fact as FactModel
-
-  graph = MagicMock()
-  graph.schema_extensions = ["roboledger"]
-  platform_session = MagicMock()
-  platform_session.execute.return_value.scalar_one_or_none.return_value = graph
-  platform_cm = MagicMock()
-  platform_cm.__enter__.return_value = platform_session
-
-  target_session = MagicMock()
-  ext_cm = MagicMock()
-  ext_cm.__enter__.return_value = target_session
-
-  source_fact_sets = [
-    {
-      "id": "fs_src_01",
-      "structure_id": None,
-      "factset_type": "report",
-      "period_start": date(2026, 1, 1),
-      "period_end": date(2026, 12, 31),
-      "entity_id": "ent_src",
-    }
-  ]
-  source_facts = [
-    {
-      "fact_set_id": "fs_src_01",
-      "element_id": "e_policy",
-      "value": None,
-      "string_value": "# Inventory Policy\n\nFIFO, lower of cost or NRV.",
-      "fact_type": "Nonnumeric",
-      "value_type": "inline",
-      "content_type": "text/markdown",
-      "decimals": None,
-      "period_start": date(2026, 1, 1),
-      "period_end": date(2026, 12, 31),
-      "period_type": "duration",
-      "unit": "USD",
-      "entity_id": "ent_src",
-    }
-  ]
-  report_snapshot = {
-    "id": "rpt_src",
-    "name": "FY Report",
-    "taxonomy_id": "tax_1",
-    "period_type": "annual",
-    "comparative": False,
-  }
-
-  from robosystems.operations.roboledger.commands import reports as reports_mod
-
-  def _fs(_session, **kwargs):
-    fs = MagicMock()
-    fs.id = "fs_shared"
-    return fs
-
-  with (
-    patch("robosystems.db.platform.SessionFactory", return_value=platform_cm),
-    patch("robosystems.db.extensions.tenant_schema_exists", return_value=True),
-    patch("robosystems.db.extensions.extensions_session", return_value=ext_cm),
-    patch.object(reports_mod, "create_fact_set", side_effect=_fs),
-    patch.object(reports_mod, "_ensure_linked_entity"),
-    # See the note on the provenance test above — the block check runs first.
-    patch.object(reports_mod, "is_source_blocked", return_value=False),
-  ):
-    result = _share_to_target(
-      source_graph_id="kg_src",
-      report_snapshot=report_snapshot,
-      source_fact_sets=source_fact_sets,
-      source_facts=source_facts,
-      target_graph_id="kg_tgt",
-      shared_by="usr_share",
-    )
-
-  assert result.status == "shared"
-  copied = [
-    call.args[0]
-    for call in target_session.add.call_args_list
-    if isinstance(call.args[0], FactModel)
-  ]
-  assert len(copied) == 1
-  [report_copy] = [
-    call.args[0]
-    for call in target_session.add.call_args_list
-    if isinstance(call.args[0], ReportModel)
-  ]
-  assert (report_copy.origin, report_copy.is_received) == ("shared", True)
-  assert copied[0].fact_type == "Nonnumeric"
-  assert copied[0].string_value.startswith("# Inventory Policy")
-  assert copied[0].value is None
-  assert copied[0].content_type == "text/markdown"
-
-
 def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
   """The holon is the wire format: the recipient views the publication the
   sender actually made, not one re-derived from the copied rows.
@@ -692,6 +504,11 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
     patch.object(reports_mod, "S3Client", return_value=s3),
     patch.object(reports_mod, "_ensure_linked_entity"),
     patch.object(reports_mod, "is_source_blocked", return_value=False),
+    # The rows are read from the holon; this test is about the files.
+    patch(
+      "robosystems.operations.roboledger.commands.report_import.receive_shared_report",
+      return_value=0,
+    ),
   ):
     result = _share_to_target(
       source_graph_id="kg_src",
@@ -703,8 +520,6 @@ def test_share_carries_the_senders_holon_into_the_recipients_prefix() -> None:
         "comparative": False,
         "generation_count": 3,
       },
-      source_fact_sets=[],
-      source_facts=[],
       publication_artifacts={
         ".tavi.json": '{"xbrlModel": "tavi"}',
         ".holon.jsonld": '{"@graph": "holon"}',

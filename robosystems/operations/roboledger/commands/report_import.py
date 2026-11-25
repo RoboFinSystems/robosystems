@@ -54,6 +54,7 @@ from robosystems.taxonomy.writer import pull_library_elements
 
 # The door a fact came through, on its provenance.
 UPLOAD_SOURCE_SYSTEM = "report_upload"
+SHARE_SOURCE_SYSTEM = "cross_graph_share"
 # The library a received report's own concepts extend.
 BOOK_STANDARD = "rs-gaap"
 RECEIVED_ELEMENT_SOURCE = "linked"
@@ -68,6 +69,9 @@ _STATEMENT_BLOCK_TYPES = frozenset(
 # Any other section is read as a disclosure: the one other type a report
 # package renders from presentation arcs and facts alone.
 _DISCLOSURE_BLOCK_TYPE = "regulatory_disclosure"
+_TEXT_BLOCK_ITEM = "textBlockItemType"
+# XBRL states a text block as escaped HTML.
+_TEXT_BLOCK_MEDIA_TYPE = "text/html"
 _STRUCTURE_BLOCK_TYPES = _STATEMENT_BLOCK_TYPES | {_DISCLOSURE_BLOCK_TYPE}
 
 
@@ -153,10 +157,7 @@ def import_report(
       ]
     )
 
-  # A nil value states that nothing was disclosed; there is nothing to load.
-  loadable = _one_per_coordinate(
-    [f for f in model.facts if not f.dims and not f.is_nil]
-  )
+  loadable = _loadable(model)
   if not loadable:
     raise ReportImportRefusedError(
       [
@@ -193,7 +194,7 @@ def import_report(
     )
 
   replaced = _delete_previous(session, entity_id, period_end, kind)
-  extension, structure_ids, concepts_added = _write_vocabulary(
+  vocabulary = _write_vocabulary(
     session,
     model,
     sections,
@@ -202,14 +203,13 @@ def import_report(
     remove_structure_ids=replaced.structure_ids,
     created_by=created_by,
   )
-  element_ids = _element_ids(session, {f.concept_qname for f in loadable})
 
   digest = hashlib.sha256(holon_text.encode("utf-8")).hexdigest()
   starts = [p.start for p in model.periods if p.start is not None]
   report = Report(
     name=name or f"{entity.name}: {kind} {period_end.isoformat()}",
     entity_id=entity_id,
-    taxonomy_id=extension.id,
+    taxonomy_id=vocabulary.extension.id,
     period_type=_period_type(model, period_end),
     period_start=min(starts) if starts else None,
     period_end=period_end,
@@ -225,7 +225,7 @@ def import_report(
         "report_id": model.filing.report_id,
         "reporting_style": model.filing.reporting_style,
         "sha256": digest,
-        "structure_ids": sorted(structure_ids.values()),
+        "structure_ids": vocabulary.created,
         "entity_identifier": model.entity.identifier,
         "entity_scheme": model.entity.scheme,
       }
@@ -234,9 +234,141 @@ def import_report(
   session.add(report)
   session.flush()
 
-  basis = f"report={model.filing.report_id} sha256={digest}"
+  written = _write_facts(
+    session,
+    model,
+    sections,
+    structure_ids=vocabulary.structure_ids,
+    report_id=str(report.id),
+    entity_id=entity_id,
+    created_by=created_by,
+    source_system=UPLOAD_SOURCE_SYSTEM,
+    basis=f"report={model.filing.report_id} sha256={digest}",
+  )
+  if replaced.report_ids:
+    # What the restatement no longer uses goes with the report it replaced.
+    remove_unused_concepts(session, created_by)
+
+  _store(graph_id, report, holon_text)
+  _settle_artifacts(session, graph_id, str(report.id), replaced.report_ids)
+  return ImportedReport(
+    report_id=str(report.id),
+    entity_id=entity_id,
+    period_end=period_end,
+    kind=kind,
+    fact_count=written,
+    structure_count=len(vocabulary.structure_ids),
+    concepts_added=vocabulary.concepts_added,
+    replaced_report_ids=replaced.report_ids,
+    **checks,
+  )
+
+
+def receive_shared_report(
+  session: Session,
+  holon_text: str,
+  *,
+  report: Report,
+  entity_id: str,
+  created_by: str,
+) -> int:
+  """Write a shared report's sections and facts from the sender's holon onto
+  ``report``, which the caller has added. The share and the file go through
+  the same reader, so a report lands the same way by either door.
+
+  Returns the number of facts loaded. Raises ``ReportImportRefusedError`` when
+  the file cannot be read. The file is not checked the way an upload is: it is
+  the sender's own publication. Does not commit.
+  """
+  model = _read(holon_text)
+  loadable = _loadable(model)
+  sections = _sections(model, loadable)
+  # The copy's own id keeps its section names apart from every other report's.
+  vocabulary = _write_vocabulary(
+    session,
+    model,
+    sections,
+    loadable,
+    report_label=f"{report.name} ({report.id})",
+    remove_structure_ids=[],
+    created_by=created_by,
+  )
+  # The sender's own reporting extension does not travel; its concepts are in
+  # this graph's received vocabulary now, so the copy names that instead.
+  if session.get(Taxonomy, report.taxonomy_id) is None:
+    report.taxonomy_id = vocabulary.extension.id
+  digest = hashlib.sha256(holon_text.encode("utf-8")).hexdigest()
+  report.metadata_ = {
+    **(report.metadata_ or {}),
+    "import": {
+      "report_id": model.filing.report_id,
+      "sha256": digest,
+      "structure_ids": vocabulary.created,
+    },
+  }
+  return _write_facts(
+    session,
+    model,
+    sections,
+    structure_ids=vocabulary.structure_ids,
+    report_id=str(report.id),
+    entity_id=entity_id,
+    created_by=created_by,
+    source_system=SHARE_SOURCE_SYSTEM,
+    basis=(
+      f"source_graph={report.source_graph_id} source_report={report.source_report_id}"
+    ),
+  )
+
+
+def delete_received_reports(
+  session: Session, report_ids: list[str], removed_by: str
+) -> None:
+  """Delete received reports with their fact sets, the sections they brought,
+  and the concepts nothing uses any more. Does not commit; the stored files
+  are the caller's to delete once it has."""
+  from robosystems.operations.roboledger.commands.reports import (
+    delete_report_fact_sets,
+  )
+
+  if not report_ids:
+    return
+  reports = (
+    session.execute(select(Report).where(Report.id.in_(report_ids))).scalars().all()
+  )
+  delete_report_fact_sets(session, report_ids)
+  for report in reports:
+    remove_report_sections(session, report, removed_by)
+    session.delete(report)
+  session.flush()
+  remove_unused_concepts(session, removed_by)
+
+
+def _loadable(model: XbrlModel) -> list[XbrlFact]:
+  """The facts that become rows: totals with a value. A nil value states that
+  nothing was disclosed, and a dimensional fact stays in the stored file."""
+  return _one_per_coordinate([f for f in model.facts if not f.dims and not f.is_nil])
+
+
+def _write_facts(
+  session: Session,
+  model: XbrlModel,
+  sections: _Sections,
+  *,
+  structure_ids: dict[str, str],
+  report_id: str,
+  entity_id: str,
+  created_by: str,
+  source_system: str,
+  basis: str,
+) -> int:
+  """One fact set per section and a row for each fact it presents. Returns
+  the number of facts loaded, each counted once."""
+  element_ids = _element_ids(
+    session, {f.concept_qname for facts in sections.membership.values() for f in facts}
+  )
   set_provenance = AssertedProvenance(
-    source_system=UPLOAD_SOURCE_SYSTEM, asserted_by=created_by, basis_note=basis
+    source_system=source_system, asserted_by=created_by, basis_note=basis
   )
   periods = {p.id: p for p in model.periods}
   units = {u.id: u for u in model.units}
@@ -253,7 +385,7 @@ def import_report(
       period_end=max(p.end for p in dated if p.end is not None),
       factset_type="report",
       entity_id=entity_id,
-      report_id=str(report.id),
+      report_id=report_id,
       created_by=created_by,
       provenance=set_provenance,
     )
@@ -274,27 +406,12 @@ def import_report(
           fact_set_id=str(fact_set.id),
           created_by=created_by,
           basis=basis,
+          source_system=source_system,
         )
       )
       written.add(fact.id)
   session.flush()
-  if replaced.report_ids:
-    # What the restatement no longer uses goes with the report it replaced.
-    remove_unused_concepts(session, created_by)
-
-  _store(graph_id, report, holon_text)
-  _settle_artifacts(session, graph_id, str(report.id), replaced.report_ids)
-  return ImportedReport(
-    report_id=str(report.id),
-    entity_id=entity_id,
-    period_end=period_end,
-    kind=kind,
-    fact_count=len(written),
-    structure_count=len(structure_ids),
-    concepts_added=concepts_added,
-    replaced_report_ids=replaced.report_ids,
-    **checks,
-  )
+  return len(written)
 
 
 def _settle_artifacts(
@@ -453,16 +570,20 @@ class _Sections:
 
 def _sections(model: XbrlModel, loadable: list[XbrlFact]) -> _Sections:
   """Each fact in every section that presents it, as a report the ledger
-  writes holds it: net income on three statements is a row on each."""
+  writes holds it: net income on three statements is a row on each.
+
+  A file may state the value once per section; the loaded fact stands for
+  every copy, so it goes wherever any of them was presented."""
   blocks = [b for b in plan_blocks(model) if b.renderable]
   by_role = fact_membership(model, blocks)
+  loaded = {_coordinate(f): f for f in loadable}
   membership: dict[str, list[XbrlFact]] = {}
   placed: set[str] = set()
-  wanted = {f.id for f in loadable}
   for block in blocks:
     here: set[str] = set()
-    for fact in by_role.get(block.role_uri, []):
-      if fact.id in wanted and fact.id not in here:
+    for presented in by_role.get(block.role_uri, []):
+      fact = None if presented.dims else loaded.get(_coordinate(presented))
+      if fact is not None and fact.id not in here:
         here.add(fact.id)
         membership.setdefault(block.role_uri, []).append(fact)
     placed |= here
@@ -581,17 +702,55 @@ def _unknown_qnames(session: Session, cited: set[str]) -> list[str]:
   return sorted(missing - in_library)
 
 
+def _coordinate(fact: XbrlFact) -> tuple[Any, ...]:
+  return (fact.concept_qname, fact.period_id, fact.unit_id, fact.language)
+
+
 def _one_per_coordinate(facts: list[XbrlFact]) -> list[XbrlFact]:
   """The fact the check kept for each concept, period and unit: the most
   precise. A report may state one value twice (a rounded figure on a summary
   page); loading both would have the reader add them."""
   best: dict[tuple[Any, ...], XbrlFact] = {}
   for fact in facts:
-    key = (fact.concept_qname, fact.period_id, fact.unit_id, fact.language)
+    key = _coordinate(fact)
     current = best.get(key)
     if current is None or precision(fact.decimals) > precision(current.decimals):
       best[key] = fact
   return list(best.values())
+
+
+@dataclass
+class _Vocabulary:
+  extension: Taxonomy
+  # Role URI to the structure its facts sit on.
+  structure_ids: dict[str, str]
+  # The structures this report brought, which go when it does.
+  created: list[str]
+  concepts_added: list[str]
+
+
+def _is_text_block(model: XbrlModel, facts: list[XbrlFact]) -> bool:
+  """Whether every value the section states is a text block: a note read as
+  narrative, which the text-block reader renders. Read from the facts, since a
+  file may not mark its headings abstract."""
+  return bool(facts) and all(
+    model.concepts[f.concept_qname].item_type == _TEXT_BLOCK_ITEM for f in facts
+  )
+
+
+def _existing_structures(session: Session, blocks: list[InformationBlock]) -> set[str]:
+  """The producer's structures this graph already holds. A library structure
+  has the same id in every graph, so a report published from one arrives on
+  the statement the library arranges."""
+  ids = sorted({b.structure_id for b in blocks if b.structure_id})
+  if not ids:
+    return set()
+  return {
+    str(sid)
+    for sid in session.execute(
+      select(Structure.id).where(Structure.id.in_(ids))
+    ).scalars()
+  }
 
 
 def _write_vocabulary(
@@ -603,12 +762,17 @@ def _write_vocabulary(
   report_label: str,
   remove_structure_ids: list[str],
   created_by: str,
-) -> tuple[Taxonomy, dict[str, str], list[str]]:
-  """Put the report's concepts and sections into the graph's received-reports
-  extension. Returns the extension, role URI to structure id, and the qnames
-  of the concepts it had to add."""
+) -> _Vocabulary:
+  """Put the report's concepts and the sections this graph lacks into the
+  graph's received-reports extension."""
   library = _library_taxonomy(session)
   cited = _cited(sections, loadable)
+  existing = _existing_structures(session, sections.blocks)
+  reused = {
+    b.role_uri: str(b.structure_id)
+    for b in sections.blocks
+    if b.structure_id in existing
+  }
 
   known = _element_ids(session, cited)
   schema = session.execute(text("SELECT current_schema()")).scalar()
@@ -632,6 +796,8 @@ def _write_vocabulary(
   associations: list[TaxonomyBlockAssociationRequest] = []
   names: dict[str, str] = {}
   for block in sections.blocks:
+    if block.role_uri in reused:
+      continue
     structure_name = f"{report_label}: {block.name}"
     names[block.role_uri] = structure_name
     block_type = (
@@ -643,6 +809,12 @@ def _write_vocabulary(
       TaxonomyBlockStructureRequest(
         name=structure_name,
         block_type=block_type,  # type: ignore[arg-type]
+        concept_arrangement=(
+          "text_block"
+          if block_type == _DISCLOSURE_BLOCK_TYPE
+          and _is_text_block(model, sections.membership.get(block.role_uri, []))
+          else None
+        ),
         role_uri=block.role_uri,
         description=block.definition,
         metadata={"received": True},
@@ -729,7 +901,8 @@ def _write_vocabulary(
       )
     ).all()
   )
-  structure_ids = {role: str(by_name[name]) for role, name in names.items()}
+  created = {role: str(by_name[name]) for role, name in names.items()}
+  structure_ids = {**reused, **created}
   if placed_here:
     element_ids = _element_ids(session, cited)
     for role, kind, arc in placed_here:
@@ -746,7 +919,12 @@ def _write_vocabulary(
         )
       )
     session.flush()
-  return extension, structure_ids, new_qnames
+  return _Vocabulary(
+    extension=extension,
+    structure_ids=structure_ids,
+    created=sorted(created.values()),
+    concepts_added=new_qnames,
+  )
 
 
 def _foreign_qnames(
@@ -814,10 +992,11 @@ def _fact_row(
   fact_set_id: str,
   created_by: str,
   basis: str,
+  source_system: str = UPLOAD_SOURCE_SYSTEM,
 ) -> Fact:
   source = fact.provenance.source if fact.provenance else None
   provenance = AssertedProvenance(
-    source_system=UPLOAD_SOURCE_SYSTEM,
+    source_system=source_system,
     asserted_by=created_by,
     basis_note=source or basis,
   ).model_dump(mode="json")
@@ -838,11 +1017,14 @@ def _fact_row(
       decimals=fact.decimals,
       unit=(unit or "").rpartition(":")[2] or "USD",
     )
+  content_type = fact.content_type
+  if content_type is None and concept.item_type == _TEXT_BLOCK_ITEM:
+    content_type = _TEXT_BLOCK_MEDIA_TYPE
   return Fact(
     **common,
     string_value=fact.value_str or "",
     fact_type="Nonnumeric",
-    content_type=fact.content_type,
+    content_type=content_type,
   )
 
 

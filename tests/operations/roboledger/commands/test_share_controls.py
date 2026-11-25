@@ -220,7 +220,12 @@ def test_block_with_purge_reports_the_number_of_reports_removed() -> None:
   ]
   body = BlockSourceGraphRequest(source_graph_id=_SOURCE_GRAPH, purge=True)
 
-  with patch(f"{_BLOCK_CMD}.enrich_blocks") as enrich:
+  with (
+    patch(f"{_BLOCK_CMD}.enrich_blocks") as enrich,
+    patch(
+      "robosystems.operations.roboledger.commands.report_import.delete_received_reports"
+    ) as delete_received,
+  ):
     enrich.return_value = [_block_response()]
     result = block_source_graph(
       session,
@@ -231,6 +236,7 @@ def test_block_with_purge_reports_the_number_of_reports_removed() -> None:
     )
 
   assert result.purged_report_count == 2
+  delete_received.assert_called_once_with(session, ["rpt_a", "rpt_b"], "user_recipient")
 
 
 def test_a_writer_can_block_without_admin() -> None:
@@ -371,8 +377,7 @@ def test_share_to_a_deprovisioned_recipient_is_reported_not_attempted() -> None:
     result = _share_to_target(
       source_graph_id=_SOURCE_GRAPH,
       report_snapshot={"id": "rpt_source", "name": "Q1", "taxonomy_id": "tax_01"},
-      source_fact_sets=[],
-      source_facts=[],
+      publication_artifacts={".holon.jsonld": "{}"},
       target_graph_id=_TARGET_GRAPH,
       shared_by="user_sender",
     )
@@ -391,8 +396,7 @@ def test_share_to_a_blocking_recipient_returns_an_error_and_writes_nothing() -> 
     result = _share_to_target(
       source_graph_id=_SOURCE_GRAPH,
       report_snapshot={"id": "rpt_source", "name": "Q1", "taxonomy_id": "tax_01"},
-      source_fact_sets=[],
-      source_facts=[],
+      publication_artifacts={".holon.jsonld": "{}"},
       target_graph_id=_TARGET_GRAPH,
       shared_by="user_sender",
     )
@@ -413,8 +417,11 @@ def test_share_to_an_unblocking_recipient_proceeds_to_the_copy() -> None:
     platform_p,
     ext_p,
     blocked_p,
-    patch(f"{_REPORTS_CMD}.create_fact_set"),
     patch(f"{_REPORTS_CMD}._ensure_linked_entity"),
+    patch(
+      "robosystems.operations.roboledger.commands.report_import.receive_shared_report",
+      return_value=0,
+    ),
   ):
     result = _share_to_target(
       source_graph_id=_SOURCE_GRAPH,
@@ -430,8 +437,7 @@ def test_share_to_an_unblocking_recipient_proceeds_to_the_copy() -> None:
         "comparative": False,
         "periods": None,
       },
-      source_fact_sets=[],
-      source_facts=[],
+      publication_artifacts={".holon.jsonld": "{}"},
       target_graph_id=_TARGET_GRAPH,
       shared_by="user_sender",
     )
@@ -526,6 +532,7 @@ def test_revoke_stamps_revoked_at_and_reports_the_copy_deleted() -> None:
     source_graph_id=_SOURCE_GRAPH,
     source_report_id="rpt_01",
     target_graph_id=_TARGET_GRAPH,
+    removed_by="user_owner",
   )
 
 
