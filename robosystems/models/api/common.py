@@ -1,10 +1,10 @@
 """Response and error shapes shared across every router."""
 
 from datetime import UTC, datetime
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 class WideInteger:
@@ -17,6 +17,48 @@ WIDE_INTEGER = WideInteger()
 
 # An amount in cents: $21,474,836.47 is where 32 bits end.
 Cents = Annotated[int, WIDE_INTEGER]
+
+
+def _normalize_legal_form(value: Any) -> Any:
+  if isinstance(value, str):
+    value = value.strip().lower()
+    return value or None
+  return value
+
+
+def _normalize_code(value: Any) -> Any:
+  if isinstance(value, str):
+    value = value.strip().upper()
+    return value or None
+  return value
+
+
+# Identifier shapes an entity's fields are checked against; blank is none.
+OptionalCountryCode = Annotated[
+  Annotated[str, Field(pattern=r"^[A-Z]{2}$")] | None,
+  BeforeValidator(_normalize_code),
+  Field(description="ISO 3166-1 alpha-2 country code."),
+]
+OptionalLei = Annotated[
+  Annotated[str, Field(pattern=r"^[A-Z0-9]{18}[0-9]{2}$")] | None,
+  BeforeValidator(_normalize_code),
+  Field(description="Legal Entity Identifier (ISO 17442): 20 letters and digits."),
+]
+OptionalCik = Annotated[
+  Annotated[str, Field(pattern=r"^[0-9]{1,10}$")] | None,
+  BeforeValidator(_normalize_code),
+  Field(description="SEC Central Index Key: up to 10 digits."),
+]
+
+
+# An entity's legal form, as stored; blank is none. Requests take only these;
+# an entity written before the list may still hold other text, so responses
+# stay `str`.
+OptionalLegalForm = Annotated[
+  Literal["corporation", "llc", "partnership", "sole_proprietorship", "non_profit"]
+  | None,
+  BeforeValidator(_normalize_legal_form),
+]
 
 
 class ErrorResponse(BaseModel):

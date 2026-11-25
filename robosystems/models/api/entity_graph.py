@@ -2,13 +2,17 @@
 
 from pydantic import BaseModel, Field, field_validator
 
+from robosystems.models.api.common import OptionalLegalForm
+
 
 class EntityCreate(BaseModel):
   name: str = Field(..., min_length=1, max_length=255)
   uri: str | None = Field(
     None,
-    min_length=1,
-    description="Entity URI. If not provided, will be auto-generated as an RDF-style URI based on the graph ID.",
+    description=(
+      "The entity's website, kept when it is an http(s) address. The entity's "
+      "URI is assigned by RoboSystems."
+    ),
   )
   ticker: str | None = None
   cik: str | None = None
@@ -17,13 +21,12 @@ class EntityCreate(BaseModel):
   sic_description: str | None = None
   category: str | None = None
   state_of_incorporation: str | None = None
-  fiscal_year_end: str | None = None
   ein: str | None = None
-  entity_type: str | None = Field(
+  entity_type: OptionalLegalForm = Field(
     default=None,
     description=(
-      "Entity legal form (corporation, llc / limited_liability_company, "
-      "partnership, sole_proprietorship, non_profit)."
+      "Entity legal form (corporation, llc, partnership, sole_proprietorship, "
+      "non_profit)."
     ),
   )
   tier: str | None = Field(
@@ -37,12 +40,12 @@ class EntityCreate(BaseModel):
     examples=[["roboledger", "roboinvestor"]],
   )
 
-  @field_validator("uri")
+  @field_validator("uri", mode="before")
   @classmethod
   def validate_uri(cls, v: str | None) -> str | None:
-    """Validate that URI is not an empty string."""
-    if v is not None and len(v.strip()) == 0:
-      raise ValueError("URI cannot be empty string")
+    """A blank website is none."""
+    if isinstance(v, str) and not v.strip():
+      return None
     return v
 
   @field_validator("extensions")

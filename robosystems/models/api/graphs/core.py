@@ -4,6 +4,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ..common import OptionalCik, OptionalLegalForm
 from .schema import CustomSchemaDefinition
 
 
@@ -48,7 +49,6 @@ class InitialEntityData(BaseModel):
           "sic": "3571",
           "sic_description": "Electronic Computers",
           "state_of_incorporation": "California",
-          "fiscal_year_end": "0930",
         },
         {
           "name": "Acme Consulting LLC",
@@ -66,26 +66,30 @@ class InitialEntityData(BaseModel):
   )
 
   name: str = Field(..., min_length=1, max_length=255, description="Entity name")
-  uri: str = Field(..., min_length=1, description="Entity website or URI")
+  uri: str | None = Field(
+    None,
+    description=(
+      "The entity's website, kept when it is an http(s) address. The entity's "
+      "URI is assigned by RoboSystems."
+    ),
+  )
   ticker: str | None = Field(
     None,
     min_length=1,
     max_length=10,
     description="Entity symbol/ticker (e.g., 'HARB', 'NVDA'). Auto-generated from name if not provided.",
   )
-  cik: str | None = Field(None, description="CIK number for SEC filings")
+  cik: OptionalCik = Field(None, description="CIK number for SEC filings")
   sic: str | None = Field(None, description="SIC code")
   sic_description: str | None = Field(None, description="SIC description")
   category: str | None = Field(None, description="Business category")
   state_of_incorporation: str | None = Field(None, description="State of incorporation")
-  fiscal_year_end: str | None = Field(None, description="Fiscal year end (MMDD)")
   ein: str | None = Field(None, description="Employer Identification Number")
-  entity_type: str | None = Field(
+  entity_type: OptionalLegalForm = Field(
     None,
     description=(
-      "Entity legal form (e.g. 'corporation', 'llc' / "
-      "'limited_liability_company', 'partnership', 'sole_proprietorship', "
-      "'non_profit'). Drives the graph's default "
+      "Entity legal form: 'corporation', 'llc', 'partnership', "
+      "'sole_proprietorship' or 'non_profit'. Drives the graph's default "
       "Reporting Style at creation — partnership and llc get dedicated "
       "equity-form Styles; everything else defaults to corporate. Blank "
       "falls back to corporate."

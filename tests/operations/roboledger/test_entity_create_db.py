@@ -16,6 +16,7 @@ from robosystems.models.api.extensions.entity import (
   UpdateEntityRequest,
 )
 from robosystems.models.extensions import Entity
+from robosystems.models.extensions.roboledger import FiscalCalendar
 from robosystems.operations.roboledger.commands.entity import (
   EntityHierarchyError,
   EntityMembershipError,
@@ -35,7 +36,11 @@ from robosystems.operations.roboledger.entity_scope import (
   membership_window,
   resolve_entity_id,
 )
-from robosystems.operations.roboledger.reads.entity import get_entity, list_entities
+from robosystems.operations.roboledger.reads.entity import (
+  fiscal_year_end_for,
+  get_entity,
+  list_entities,
+)
 from robosystems.operations.roboledger.reads.industries import (
   UnknownIndustryError,
   list_industries,
@@ -377,8 +382,6 @@ class TestConsolidationFields:
 class TestCreateSubsidiary:
   def test_a_new_entity_is_a_subsidiary_of_the_group_parent(self, two_entities):
     session, parent = two_entities.session, two_entities.parent
-    parent.fiscal_year_end = "06-30"
-    session.flush()
 
     created = create_entity(
       session,
@@ -393,8 +396,8 @@ class TestCreateSubsidiary:
     assert created.status == "active"
     assert created.legal_name == "Cedar Row LLC"
     assert created.reporting_style_id == ReportingStyleConstants.LLC_STYLE_ID
-    # The group has one fiscal cadence; a sub that names no year end follows it.
-    assert created.fiscal_year_end == "06-30"
+    # The year end is the calendar's, and a new entity has none yet.
+    assert created.fiscal_year_end is None
     assert created.ticker == "CRL"
     assert created.uri == f"https://robosystems.ai/entities#{created.id}"
     # Nothing moved: the parent is still the group parent.
@@ -410,14 +413,12 @@ class TestCreateSubsidiary:
         name="Maple Court Parking LLC",
         parent_entity_id=sub.id,
         ownership_pct=51.5,
-        fiscal_year_end="12-31",
       ),
       created_by="usr_1",
     )
 
     assert created.parent_entity_id == sub.id
     assert created.ownership_pct == 51.5
-    assert created.fiscal_year_end == "12-31"
     assert created.reporting_style_id == ReportingStyleConstants.DEFAULT_STYLE_ID
 
   def test_a_parent_must_be_one_of_this_graphs_own_entities(self, two_entities):
@@ -544,7 +545,7 @@ class TestReportingStyle:
     )
     llc = create_entity(
       session,
-      CreateEntityRequest(name="Pier LLC", entity_type="Limited_Liability_Company"),
+      CreateEntityRequest(name="Pier LLC", entity_type="LLC"),
       created_by="u",
     )
     corp = create_entity(session, CreateEntityRequest(name="Pier Inc"), created_by="u")
@@ -740,3 +741,32 @@ class TestConsolidationFollowUps:
       session, UpdateEntityRequest(entity_id=sub.id, left_on=None), created_by="u"
     )
     assert reopened.left_on is None
+
+
+class TestFiscalYearEnd:
+  """An entity's fiscal year end is read from its fiscal calendar."""
+
+  @pytest.mark.parametrize(
+    "start,end", [(1, "12-31"), (7, "06-30"), (3, "02-28"), (10, "09-30")]
+  )
+  def test_the_month_before_the_start_ends_the_year(self, start, end):
+    assert fiscal_year_end_for(start) == end
+
+  def test_reads_the_calendar_not_the_stored_text(self, two_entities):
+    session, parent = two_entities.session, two_entities.parent
+    parent.fiscal_year_end = "December"
+    session.add(
+      FiscalCalendar(graph_id="kg_test", entity_id=parent.id, fiscal_year_start_month=7)
+    )
+    session.flush()
+
+    entity = get_entity(session, parent.id)
+    assert entity is not None
+    assert entity.fiscal_year_end == "06-30"
+    listed = {e.id: e for e in list_entities(session)}
+    assert listed[parent.id].fiscal_year_end == "06-30"
+    assert listed[two_entities.sub.id].fiscal_year_end is None
+
+  def test_create_and_update_no_longer_take_it(self):
+    assert "fiscal_year_end" not in UpdateEntityRequest.model_fields
+    assert "fiscal_year_end" not in CreateEntityRequest.model_fields

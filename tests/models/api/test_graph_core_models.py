@@ -69,7 +69,6 @@ class TestInitialEntityData:
       sic_description="Electronic Computers",
       category="Technology",
       state_of_incorporation="California",
-      fiscal_year_end="0930",
       ein="94-2404110",
     )
     assert model.ein == "94-2404110"
@@ -78,9 +77,8 @@ class TestInitialEntityData:
     with pytest.raises(ValidationError):
       InitialEntityData(uri="https://test.co")  # type: ignore[call-arg]
 
-  def test_uri_required(self):
-    with pytest.raises(ValidationError):
-      InitialEntityData(name="Test")  # type: ignore[call-arg]
+  def test_website_is_optional(self):
+    assert InitialEntityData(name="Test").uri is None
 
   def test_name_min_length(self):
     with pytest.raises(ValidationError):
@@ -90,9 +88,8 @@ class TestInitialEntityData:
     with pytest.raises(ValidationError):
       InitialEntityData(name="x" * 256, uri="https://test.co")
 
-  def test_uri_min_length(self):
-    with pytest.raises(ValidationError):
-      InitialEntityData(name="Test", uri="")
+  def test_a_blank_website_is_accepted(self):
+    assert InitialEntityData(name="Test", uri="").uri == ""
 
 
 @pytest.mark.unit

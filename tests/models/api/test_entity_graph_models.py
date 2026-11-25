@@ -33,7 +33,6 @@ class TestEntityCreate:
       sic_description="Electronic Computers",
       category="Technology",
       state_of_incorporation="California",
-      fiscal_year_end="0930",
       ein="94-2404110",
       tier="ladybug-standard",
       extensions=["roboledger"],
@@ -63,17 +62,9 @@ class TestEntityCreate:
     model = EntityCreate(name="x" * 255)
     assert len(model.name) == 255
 
-  def test_uri_cannot_be_empty_string(self):
-    with pytest.raises(ValidationError) as exc_info:
-      EntityCreate(name="Test", uri="")
-    errors = exc_info.value.errors()
-    assert any(e["loc"] == ("uri",) for e in errors)
-
-  def test_uri_cannot_be_whitespace_only(self):
-    with pytest.raises(ValidationError) as exc_info:
-      EntityCreate(name="Test", uri="   ")
-    errors = exc_info.value.errors()
-    assert any(e["loc"] == ("uri",) for e in errors)
+  @pytest.mark.parametrize("blank", ["", "   "])
+  def test_a_blank_website_is_none(self, blank):
+    assert EntityCreate(name="Test", uri=blank).uri is None
 
   def test_uri_valid_value(self):
     model = EntityCreate(name="Test", uri="https://example.com")

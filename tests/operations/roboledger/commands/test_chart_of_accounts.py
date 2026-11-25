@@ -206,14 +206,16 @@ class TestInitializeChartOfAccounts:
     assert response.entity_type == "partnership"
     session.get.assert_not_called()
 
-  def test_unknown_entity_type_reports_the_form_actually_used(self) -> None:
-    """An unrecognised legal form maps the corporation equity rows; the
+  def test_a_form_without_rows_reports_the_form_actually_used(self) -> None:
+    """A legal form with no rows of its own maps the corporation equity rows; the
     response and the chart's metadata say so instead of echoing the input."""
     session = _session_for("saas")
 
     response = initialize_chart_of_accounts(
       session,
-      InitializeChartOfAccountsRequest(template="saas", entity_type="sole-prop"),
+      InitializeChartOfAccountsRequest(
+        template="saas", entity_type="sole_proprietorship"
+      ),
       "usr_1",
     )
 

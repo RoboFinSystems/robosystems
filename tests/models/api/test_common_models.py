@@ -233,3 +233,75 @@ class TestErrorCode:
     assert ErrorCode.ALREADY_EXISTS == "ALREADY_EXISTS"
     assert ErrorCode.INVALID_INPUT == "INVALID_INPUT"
     assert ErrorCode.DATABASE_ERROR == "DATABASE_ERROR"
+
+
+@pytest.mark.unit
+class TestLegalForm:
+  """Entity create and update take a legal form only from the list."""
+
+  @pytest.mark.parametrize(
+    "given,stored",
+    [
+      ("llc", "llc"),
+      ("  LLC ", "llc"),
+      ("Partnership", "partnership"),
+      ("non_profit", "non_profit"),
+      ("", None),
+      (None, None),
+    ],
+  )
+  def test_normalizes_to_the_stored_value(self, given, stored):
+    from robosystems.models.api.extensions.entity import UpdateEntityRequest
+
+    assert UpdateEntityRequest(entity_type=given).entity_type == stored
+
+  @pytest.mark.parametrize(
+    "given", ["limited_liability_company", "lp", "subsidiary", "S-Corp"]
+  )
+  def test_refuses_a_form_off_the_list(self, given):
+    from robosystems.models.api.extensions.entity import CreateEntityRequest
+
+    with pytest.raises(ValidationError, match="corporation"):
+      CreateEntityRequest(name="Pier", entity_type=given)
+
+
+@pytest.mark.unit
+class TestEntityIdentifiers:
+  """LEI, CIK and country are checked for shape, uppercased; blank is none."""
+
+  def test_normalizes(self):
+    from robosystems.models.api.extensions.entity import UpdateEntityRequest
+
+    body = UpdateEntityRequest(
+      lei=" 5493001kj5x1kjt2j567 ", cik="0000320193", address_country="us"
+    )
+    assert body.lei == "5493001KJ5X1KJT2J567"
+    assert body.cik == "0000320193"
+    assert body.address_country == "US"
+    assert UpdateEntityRequest(lei="", cik="", address_country="").lei is None
+
+  @pytest.mark.parametrize(
+    "field,value",
+    [
+      ("lei", "5493001KJ5X1"),
+      ("lei", "5493001KJ5X1KJT2J5AB"),
+      ("cik", "CIK0000320193"),
+      ("cik", "12345678901"),
+      ("address_country", "USA"),
+      ("address_country", "United States"),
+    ],
+  )
+  def test_refuses_the_wrong_shape(self, field, value):
+    from robosystems.models.api.extensions.entity import CreateEntityRequest
+
+    with pytest.raises(ValidationError):
+      CreateEntityRequest(name="Pier", **{field: value})
+
+  def test_the_uri_is_not_an_input(self):
+    from robosystems.models.api.extensions.entity import (
+      CreateEntityRequest,
+      UpdateEntityRequest,
+    )
+
+    assert "uri" not in CreateEntityRequest.model_fields
+    assert "uri" not in UpdateEntityRequest.model_fields

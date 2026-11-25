@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import calendar
+from collections.abc import Iterable
 from datetime import date
 
 from sqlalchemy import select
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 
 from robosystems.models.api.extensions.entity import LedgerEntityResponse
 from robosystems.models.extensions import Entity
+from robosystems.models.extensions.roboledger import FiscalCalendar
 from robosystems.operations.roboledger.entity_scope import (
   NoEntityError,
   find_parent_entity,
@@ -16,7 +19,39 @@ from robosystems.operations.roboledger.entity_scope import (
 )
 
 
-def entity_to_response(entity: Entity) -> LedgerEntityResponse:
+def fiscal_year_end_for(start_month: int | None) -> str | None:
+  """The MM-DD a fiscal year starting in ``start_month`` ends on."""
+  if start_month is None:
+    return None
+  end_month = 12 if start_month == 1 else start_month - 1
+  # A non-leap year: a February year-end is 02-28.
+  return f"{end_month:02d}-{calendar.monthrange(2001, end_month)[1]:02d}"
+
+
+def fiscal_year_ends(session: Session, entity_ids: Iterable[str]) -> dict[str, str]:
+  """Each entity's fiscal year-end from its fiscal calendar; an entity with
+  no calendar yet is absent."""
+  rows = session.execute(
+    select(FiscalCalendar.entity_id, FiscalCalendar.fiscal_year_start_month).where(
+      FiscalCalendar.entity_id.in_(list(entity_ids))
+    )
+  ).all()
+  return {
+    entity_id: end
+    for entity_id, start in rows
+    if (end := fiscal_year_end_for(start)) is not None
+  }
+
+
+def load_entity_response(session: Session, entity: Entity) -> LedgerEntityResponse:
+  return entity_to_response(
+    entity, fiscal_year_ends(session, [entity.id]).get(entity.id)
+  )
+
+
+def entity_to_response(
+  entity: Entity, fiscal_year_end: str | None
+) -> LedgerEntityResponse:
   return LedgerEntityResponse(
     id=entity.id,
     name=entity.name,
@@ -29,7 +64,7 @@ def entity_to_response(entity: Entity) -> LedgerEntityResponse:
     sic_description=entity.sic_description,
     category=entity.category,
     state_of_incorporation=entity.state_of_incorporation,
-    fiscal_year_end=entity.fiscal_year_end,
+    fiscal_year_end=fiscal_year_end,
     tax_id=entity.tax_id,
     lei=entity.lei,
     industry=entity.industry,
@@ -74,7 +109,7 @@ def get_parent_entity(session: Session) -> LedgerEntityResponse | None:
   entity = resolve_parent_entity(session)
   if entity is None:
     return None
-  return entity_to_response(entity)
+  return load_entity_response(session, entity)
 
 
 def get_entity(
@@ -87,7 +122,7 @@ def get_entity(
     entity = resolve_entity(session, entity_id)
   except NoEntityError:
     return None
-  return entity_to_response(entity)
+  return load_entity_response(session, entity)
 
 
 def list_entities(
@@ -99,4 +134,5 @@ def list_entities(
     query = query.where(Entity.source == source)
   query = query.order_by(Entity.name)
   entities = session.execute(query).scalars().all()
-  return [entity_to_response(e) for e in entities]
+  year_ends = fiscal_year_ends(session, [e.id for e in entities])
+  return [entity_to_response(e, year_ends.get(e.id)) for e in entities]

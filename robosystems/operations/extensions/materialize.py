@@ -443,7 +443,15 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       sic_description,
       category,
       state_of_incorporation,
-      fiscal_year_end,
+      -- The year end is the fiscal calendar's: the month before it starts.
+      (
+        SELECT strftime(
+          last_day(make_date(2001, ((fc.fiscal_year_start_month + 10) % 12) + 1, 1)),
+          '%m-%d'
+        )
+        FROM postgres_scan('{c}', '{s}', 'fiscal_calendar') fc
+        WHERE fc.entity_id = e.id
+      )                               AS fiscal_year_end,
       tax_id,
       lei,
       phone,
@@ -453,7 +461,7 @@ def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
       parent_entity_id,
       CAST(created_at AS VARCHAR)     AS created_at,
       CAST(updated_at AS VARCHAR)     AS updated_at
-    FROM postgres_scan('{c}', '{s}', 'entities')
+    FROM postgres_scan('{c}', '{s}', 'entities') e
   """
 
   # Forecast (scenario_id set) facts and fact sets stay OLTP-only: the graph

@@ -200,6 +200,8 @@ class URIConstants:
   ROBOSYSTEMS_BASE_URI = "https://robosystems.ai"
   ROBOLEDGER_BASE_URI = "https://roboledger.ai"
   ROBOINVESTOR_BASE_URI = "https://roboinvestor.ai"
+  # An entity's URI is this followed by its id; RoboSystems assigns it.
+  ENTITY_URI_BASE = ROBOSYSTEMS_BASE_URI + "/entities#"
 
   # External service URIs
   QUICKBOOKS_BASE_URI = "https://quickbooks.intuit.com"

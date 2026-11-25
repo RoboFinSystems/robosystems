@@ -82,3 +82,17 @@ class TestProvisionEntityStyleResolution:
   async def test_no_entity_type_uses_default(self) -> None:
     kwargs = await _provision_entity_kwargs({"name": "X", "uri": "https://x.co"})
     assert kwargs["reporting_style_id"] == RS.DEFAULT_STYLE_ID
+
+
+class TestProvisionEntityUri:
+  """The entity URI is assigned; the request's `uri` is kept only as a website."""
+
+  async def test_the_uri_is_assigned_from_the_entity_id(self) -> None:
+    kwargs = await _provision_entity_kwargs({"name": "C", "uri": "https://c.co"})
+    assert kwargs["uri"] == "https://robosystems.ai/entities#entity_kg1"
+    assert kwargs["website"] == "https://c.co"
+
+  async def test_a_value_that_is_not_a_web_address_is_not_a_website(self) -> None:
+    kwargs = await _provision_entity_kwargs({"name": "C", "uri": "acme-co"})
+    assert kwargs["uri"] == "https://robosystems.ai/entities#entity_kg1"
+    assert kwargs["website"] is None
