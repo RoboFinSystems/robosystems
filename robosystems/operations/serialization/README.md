@@ -19,13 +19,14 @@ build_report_bundle (bundle.py)  →  StatementBundle
         └─ xbrl/xbrl_21.py                     XBRL 2.1 package (lxml)
 
 stored holon ─┬─ rdf/lineage.py    the same holon with its #lineage graph
-              └─ rdf/databook.py   the DataBook (Markdown)
+              ├─ rdf/databook.py   the DataBook (Markdown)
+              └─ rdf/workbook.py   the workbook (Excel)
 ```
 
 The holon is written when a report is published and stored. Every other format
-is built on first download and cached beside it. Two of them are built from
+is built on first download and cached beside it. Three of them are built from
 the stored holon, not from the rows: the lineage holon splices a fourth named
-graph into it, and the DataBook is a rendering of it.
+graph into it, and the DataBook and the workbook are renderings of it.
 
 ## Modules
 
@@ -37,12 +38,14 @@ graph into it, and the DataBook is a rendering of it.
 | `rdf/holon.py` | The holon: the report as named graphs over one report IRI, written by xbrlkit's `to_holon` |
 | `rdf/lineage.py` | The `#lineage` graph: the ledger lines behind each frozen figure, re-derived at download and checked against the hash frozen at close |
 | `rdf/databook.py` | The DataBook: the stored holon as a Markdown document, written by xbrlkit's `databook_from_holon` |
+| `rdf/workbook.py` | The workbook: the stored holon as an Excel file, a sheet per section, written by xbrlkit's `workbook_from_holon` |
 | `xbrl/tavi.py` | The Tavi compiled JSON model, written by xbrlkit |
 | `xbrl/xbrl_21.py` | The XBRL 2.1 package: instance, schema and linkbases as a flat zip |
 
 `serialize_to_rdf` and `serialize_to_xbrl` dispatch a bundle by flavor. The
-DataBook has its own entry point, `serialize_holon_to_databook`, because it
-takes a holon and not a bundle.
+DataBook and the workbook have their own entry points,
+`serialize_holon_to_databook` and `serialize_holon_to_workbook`, because they
+take a holon and not a bundle.
 
 ## What is defined elsewhere
 
@@ -64,10 +67,10 @@ takes a holon and not a bundle.
 
 - **Name what a format leaves out.** A format that cannot carry part of the
   bundle says so: the download response returns the list as `omittedContent`
-  (`TAVI_OMITTED_CONTENT`, `DATABOOK_OMITTED_CONTENT`; XBRL 2.1's is set where
-  the download is built). Nothing is dropped silently.
-- **The DataBook is built from the stored holon,** never from the rows, so it
-  always describes the file it names by digest.
+  (`TAVI_OMITTED_CONTENT`, `DATABOOK_OMITTED_CONTENT`,
+  `WORKBOOK_OMITTED_CONTENT`; XBRL 2.1's is set where the download is built). Nothing is dropped silently.
+- **The DataBook and the workbook are built from the stored holon,** never
+  from the rows, so each always describes the file it names by digest.
 - **Nothing here validates.** The platform does not run the holon shapes or
   Arelle at publish. `examples/_common/validate.py` runs both over a
   download, and `tests/operations/serialization/` holds the sample files to

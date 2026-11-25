@@ -25,13 +25,14 @@ A published RoboLedger report downloads as a file in three formats: the holon (J
 
 ## Overview
 
-A published report is not a rendered document. It is a structured object: the report's facts, periods, concept declarations, presentation and calculation networks, and the [Information Block](Information-Blocks.md) for each statement. The holon, the Tavi and the XBRL 2.1 package are projections of that one assembled object, so they cannot disagree with each other; the DataBook is written from the holon itself.
+A published report is not a rendered document. It is a structured object: the report's facts, periods, concept declarations, presentation and calculation networks, and the [Information Block](Information-Blocks.md) for each statement. The holon, the Tavi and the XBRL 2.1 package are projections of that one assembled object, so they cannot disagree with each other; the DataBook and the workbook are written from the holon itself.
 
 | Format | `format` value | What it is for |
 | --- | --- | --- |
 | **Holon JSON-LD** | `HOLON_JSONLD` | The report's anchor file, stored at publish, and the default download: JSON-LD in dataset form, as named graphs; opens in xbrlkit, and reads with any RDF library |
 | **Holon JSON-LD with lineage** | `HOLON_JSONLD_LINEAGE` | The same holon with a fourth named graph, `#lineage`: the ledger lines, entries and events behind every frozen figure, so a reader with the file can trace a number to the books. For the graph's own members; built on first download. See [Lineage](#lineage) |
 | **DataBook** | `DATABOOK` | The holon as a document to read: Markdown tables whose values link to their facts in the holon, with the same facts as RDF beneath each. Written from the stored holon on first download. See [DataBook](#databook) |
+| **Workbook** | `WORKBOOK` | The holon as an Excel file: a sheet per section, a row per line, a column per period, each line's breakdowns beneath it. Every number is the reported fact and no cell is a formula. Written from the stored holon on first download. See [Workbook](#workbook) |
 | **Tavi** | `TAVI` | A compact compiled model in XBRL International's Project Tavi form, the form the SEC pipeline also publishes beside each filing; opens in xbrlkit |
 | **XBRL 2.1** | `XBRL_2_1` | A standard XBRL 2.1 package for regulators and XBRL tooling |
 
@@ -98,7 +99,7 @@ POST /extensions/{graph_id}/graphql
 | Argument | Default | Notes |
 | --- | --- | --- |
 | `reportId` | | Required; the report's id |
-| `format` | `HOLON_JSONLD` | `HOLON_JSONLD`, `HOLON_JSONLD_LINEAGE`, `DATABOOK`, `TAVI`, or `XBRL_2_1` |
+| `format` | `HOLON_JSONLD` | `HOLON_JSONLD`, `HOLON_JSONLD_LINEAGE`, `DATABOOK`, `WORKBOOK`, `TAVI`, or `XBRL_2_1` |
 | `expiresIn` | `300` | Lifetime of the link in seconds, 60 to 3600 |
 
 Every format answers with the same envelope: a short-lived signed link that the client follows to fetch the file. The API never streams the bytes itself.
@@ -125,21 +126,22 @@ curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
 curl -L "<downloadUrl>" -o report.holon.jsonld
 ```
 
-Pass `format: HOLON_JSONLD_LINEAGE` (`-o report.lineage.holon.jsonld`), `format: DATABOOK` (`-o report.databook.md`), `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zip`) for the others; the query and the envelope are the same.
+Pass `format: HOLON_JSONLD_LINEAGE` (`-o report.lineage.holon.jsonld`), `format: DATABOOK` (`-o report.databook.md`), `format: WORKBOOK` (`-o report.xlsx`), `format: TAVI` (`-o report.tavi.json`) or `format: XBRL_2_1` (`-o report.zip`) for the others; the query and the envelope are the same.
 
 | Format | `format` in the response | `contentType` |
 | --- | --- | --- |
 | `HOLON_JSONLD` | `holon-jsonld` | `application/ld+json` |
 | `HOLON_JSONLD_LINEAGE` | `holon-jsonld-lineage` | `application/ld+json` |
 | `DATABOOK` | `databook` | `text/markdown; charset=utf-8` |
+| `WORKBOOK` | `workbook` | `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet` |
 | `TAVI` | `tavi` | `application/json` |
 | `XBRL_2_1` | `xbrl-2.1` | `application/zip` |
 
-`omittedContent` names report content the chosen format leaves out. It is empty for the holon. The Tavi names four items, `ib_envelopes`, `definition_links`, `framework_pins` and `filing_lifecycle` (see [Tavi](#tavi)); XBRL 2.1 names `disclosure_notes`; the DataBook names what it leaves to the holon (see [DataBook](#databook)). The holon is written from the same model as the Tavi and does not carry those four either, though its `omittedContent` is empty: what it has of each section is an `rs:InformationBlock` node naming the section's structure, FactSet and block type, and of the filing lifecycle only `rs:filingDate` on a filed report. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
+`omittedContent` names report content the chosen format leaves out. It is empty for the holon. The Tavi names four items, `ib_envelopes`, `definition_links`, `framework_pins` and `filing_lifecycle` (see [Tavi](#tavi)); XBRL 2.1 names `disclosure_notes`; the DataBook and the workbook each name what they leave to the holon (see [DataBook](#databook) and [Workbook](#workbook)). The holon is written from the same model as the Tavi and does not carry those four either, though its `omittedContent` is empty: what it has of each section is an `rs:InformationBlock` node naming the section's structure, FactSet and block type, and of the filing lifecycle only `rs:filingDate` on a filed report. The field returns `null` for a `reportId` that does not resolve. Error codes are listed under [Troubleshooting](#troubleshooting).
 
 ## Downloading from Code
 
-**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `holon-jsonld-lineage`, `databook`, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP.md).
+**From an AI client.** On a graph's MCP connection, the `get-report-bundle` tool returns the same short-lived link, with the same `format` choices (`holon-jsonld` by default, `holon-jsonld-lineage`, `databook`, `workbook`, `tavi`, `xbrl-2.1`). It is meant for a reader on the same machine that loads a file by URL, such as `xbrlkit serve`. The link carries its own credential, so pass it straight to the tool that fetches it rather than into a message. The RoboLedger connector address (`/v1/mcp/roboledger`) does not offer this tool; see [AI Operators & MCP](AI-Operators-and-MCP.md).
 
 **From Python.** The [Python SDK](https://github.com/RoboFinSystems/robosystems-python-client) resolves the link and follows it in one call:
 
@@ -223,6 +225,23 @@ The document carries the facts and points at the rest. Its frontmatter names the
 
 It is written from the stored holon, never from the rows, so a received report has one whenever its holon is in storage. The first download writes it and later ones reuse it; `xbrlkit databook report.holon.jsonld` writes the same document from a holon on your own machine.
 
+### Workbook
+
+The holon as an Excel file, for a reader who opens a spreadsheet. A contents sheet names the holon by IRI and by SHA-256 and lists every sheet with its counts; then there is one sheet per section of the report, in the report's order.
+
+On a section's sheet a row is a line the section presents and a column is a period. Under a line sit its breakdowns, one row per member of the section's own axes, so unlike the DataBook the workbook carries the values broken out by segment or another axis. Each row also names its unit and its concept.
+
+What it does to the facts, all of it stated on the contents sheet:
+
+- **Every number is the reported fact, written as a number.** No cell holds a formula, so a total is the reported total and nothing is recomputed.
+- **A balance is read into the period it opens or closes**, so a roll-forward reads as it prints: the beginning balance and the ending balance sit in the period's own column.
+- **A line presented with a negated label shows its value with the sign reversed**, as the statement prints it, and a `Sign` column marks the line.
+- **A period only a stray fact or two is dated on has no column.** The contents sheet counts the facts each section holds beside those it shows.
+
+`omittedContent` on this format names `sparse_period_facts` (the facts left out by that last rule), `presentation_links`, `calculation_links`, `definition_links`, `ib_envelopes`, `framework_pins` and `filing_lifecycle`.
+
+It is written from the stored holon, never from the rows, so a received report has one whenever its holon is in storage. The first download writes it and later ones reuse it; `xbrlkit workbook report.holon.jsonld` writes the same file from a holon on your own machine.
+
 ### Tavi
 
 The report as a Project Tavi compiled model: one compact JSON document in the OIM-family form XBRL International is drafting, the same form the SEC pipeline writes beside every filing. A RoboLedger report and an SEC filing come out in one shape, and one reader handles both. The document is a `documentInfo` header and an `xbrlModel` holding the concepts, labels, networks, groups, units and facts.
@@ -280,20 +299,20 @@ The package carries the statements only. Tenant-authored disclosure notes render
 
 XBRL 2.1 has no standard place for the platform-specific content, so the package leaves it out; only the disclosure notes are named in its `omittedContent`. The definition arcs reach a file only in the XBRL package.
 
-| Content | Holon | DataBook | Tavi | XBRL 2.1 |
-| --- | --- | --- | --- | --- |
-| Statement facts | Yes | The consolidated values, as tables and as RDF; values broken out by an axis stay in the holon | Yes | Yes |
-| Presentation and calculation networks | Yes | No (named by their graph in the holon) | Yes | Yes |
-| Disclosure notes | Yes | Yes, long text as an excerpt | Yes | No |
-| Information Block envelopes | No (each section's structure, FactSet and block type only) | No | No | No |
-| Definition arcs | No | No | No | Yes, when present |
-| Reporting Style, FactSets | Yes | The Reporting Style only | Yes | No |
-| Framework pins, filing lifecycle | No (the filing date only) | No | No | No |
-| A validation verdict | No | Yes, the holon's | No | No |
+| Content | Holon | DataBook | Workbook | Tavi | XBRL 2.1 |
+| --- | --- | --- | --- | --- | --- |
+| Statement facts | Yes | The consolidated values, as tables and as RDF; values broken out by an axis stay in the holon | Yes, and the values broken out by an axis; not facts on a sparse period | Yes | Yes |
+| Presentation and calculation networks | Yes | No (named by their graph in the holon) | No (the lines are in presentation order; the arcs stay in the holon) | Yes | Yes |
+| Disclosure notes | Yes | Yes, long text as an excerpt | Yes, long text cut at a cell's limit | Yes | No |
+| Information Block envelopes | No (each section's structure, FactSet and block type only) | No | No | No | No |
+| Definition arcs | No | No | No | No | Yes, when present |
+| Reporting Style, FactSets | Yes | The Reporting Style only | No | Yes | No |
+| Framework pins, filing lifecycle | No (the filing date only) | No | No | No | No |
+| A validation verdict | No | Yes, the holon's | No | No | No |
 
 ### Received reports
 
-A report this graph did not author (`origin` `shared` or `uploaded`; see [Reporting & Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)) downloads as the file that arrived, never as one rebuilt from the copied rows. A report shared in from another graph has the sender's holon and Tavi as of the share. A report loaded from a file is kept as a holon only: ask for `HOLON_JSONLD`, or for `DATABOOK`, which is written from that holon, and convert with xbrlkit if you need another form. Neither has lineage. A format a received report does not have answers `REPORT_BUNDLE_NOT_AVAILABLE`, with a message saying whether to ask the sender to share again or to load the file again.
+A report this graph did not author (`origin` `shared` or `uploaded`; see [Reporting & Rendering § The Report Is the Package](Reporting-and-Rendering.md#the-report-is-the-package)) downloads as the file that arrived, never as one rebuilt from the copied rows. A report shared in from another graph has the sender's holon and Tavi as of the share. A report loaded from a file is kept as a holon only: ask for `HOLON_JSONLD`, or for `DATABOOK` or `WORKBOOK`, which are written from that holon, and convert with xbrlkit if you need another form. Neither has lineage. A format a received report does not have answers `REPORT_BUNDLE_NOT_AVAILABLE`, with a message saying whether to ask the sender to share again or to load the file again.
 
 ## Reading an Export Without the Platform
 
@@ -314,6 +333,9 @@ uvx xbrlkit@latest validate report.holon.jsonld
 
 # Write the holon as a DataBook, the same document the DATABOOK download returns.
 uvx xbrlkit@latest databook report.holon.jsonld
+
+# Write the holon as an Excel workbook, the same file the WORKBOOK download returns.
+uvx --from "xbrlkit[xlsx]@latest" xbrlkit workbook report.holon.jsonld
 ```
 
 The DataBook itself needs no tool: it is Markdown, and opens in any viewer or text editor.

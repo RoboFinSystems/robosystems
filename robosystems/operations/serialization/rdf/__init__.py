@@ -26,4 +26,9 @@ def serialize_to_rdf(
       "The DataBook is written from a holon, not from a bundle; use "
       "serialize_holon_to_databook(holon, holon_filename=...)."
     )
+  if flavor is RdfFlavor.WORKBOOK:
+    raise ValueError(
+      "The workbook is written from a holon, not from a bundle; use "
+      "serialize_holon_to_workbook(holon, holon_filename=...)."
+    )
   raise ValueError(f"Unsupported RDF flavor: {flavor!r}")
