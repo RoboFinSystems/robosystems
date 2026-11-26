@@ -387,3 +387,46 @@ class TestGraphApiClientSecurityGroup:
     client, fallback = ingress.split("          - IpProtocol: tcp\n")[1:]
     assert "SourceSecurityGroupId: !Ref GraphApiClientSecurityGroupId" in client
     assert "CidrIp: !Ref VpcCidr" in fallback
+
+
+def _backend_deploy_trust_patterns() -> list[str]:
+  """The workflow-file globs the backend deploy role's trust admits."""
+  text = (CFN_DIR / "bootstrap-oidc.yaml").read_text()
+  backend = text[text.index("  GitHubActionsRole:") : text.index("      Policies:")]
+  return re.findall(r"/\.github/workflows/([\w.*-]+)@\*", backend)
+
+
+class TestDeployRoleTrustNamesItsWorkflows:
+  """The deploy role's trust lists the workflows that may assume it. One that
+  configures AWS credentials and is missing from the list fails at its first
+  deploy; one that is listed and should not be is the thing the list is for."""
+
+  def test_patterns_are_discoverable(self):
+    assert "deploy-*.yml" in _backend_deploy_trust_patterns()
+
+  def test_every_workflow_that_assumes_the_role_is_admitted(self):
+    import fnmatch
+
+    patterns = _backend_deploy_trust_patterns()
+    assuming = [
+      w.name
+      for w in sorted(WORKFLOW_DIR.glob("*.yml"))
+      if "configure-aws-credentials" in w.read_text()
+    ]
+    assert assuming
+    unlisted = [
+      name for name in assuming if not any(fnmatch.fnmatch(name, p) for p in patterns)
+    ]
+    assert unlisted == []
+
+  def test_no_other_workflow_is_admitted(self):
+    import fnmatch
+
+    patterns = _backend_deploy_trust_patterns()
+    admitted_without_need = [
+      w.name
+      for w in sorted(WORKFLOW_DIR.glob("*.yml"))
+      if any(fnmatch.fnmatch(w.name, p) for p in patterns)
+      and "configure-aws-credentials" not in w.read_text()
+    ]
+    assert admitted_without_need == []
