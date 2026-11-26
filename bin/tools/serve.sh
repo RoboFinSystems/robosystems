@@ -555,7 +555,9 @@ write_settings() {
 # encrypted its connections with a key derived from the JWT secret, so that is
 # the key it pins. It first checks the JWT secret is one selfhost will accept.
 # Plain sh, so it runs on a stack of any age.
-PIN_CREDENTIALS_KEY=$(
+# A function, not a variable set from $(cat <<EOF): bash 3.2, which macOS
+# ships, ends a command substitution at the first case pattern's parenthesis.
+pin_credentials_key_script() {
   cat <<'EOF'
 cd /data/robosystems
 # The value as the application reads it: one pair of surrounding quotes off.
@@ -577,7 +579,7 @@ sed -i -E '/^#? ?CONNECTION_CREDENTIALS_KEY=/d' .env
 printf 'CONNECTION_CREDENTIALS_KEY=%s\n' "$KEY" >>.env
 echo "credentials key pinned"
 EOF
-)
+}
 
 cmd_set() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: just serve set <KEY> [value]"
@@ -596,7 +598,7 @@ cmd_set() {
   esac
   if [ "$key" = ENVIRONMENT ] && [ "$value" = selfhost ]; then
     echo "Pinning the credentials key the stack has used so far."
-    on_instance 60 "$PIN_CREDENTIALS_KEY"
+    on_instance 60 "$(pin_credentials_key_script)"
   fi
   secret=$(settings_secret)
   write_settings "$secret" '.[$key] = $value' --arg key "$key" --arg value "$value"
