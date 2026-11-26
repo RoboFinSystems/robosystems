@@ -1,6 +1,6 @@
 # CloudFormation Templates
 
-Infrastructure as Code for deploying RoboSystems to AWS. All templates are deployed via GitHub Actions workflows, except `bootstrap-oidc.yaml` which is deployed locally to enable CI/CD authentication.
+Infrastructure as Code for deploying RoboSystems to AWS. All templates are deployed via GitHub Actions workflows, except `bootstrap-oidc.yaml`, which is deployed locally to enable CI/CD authentication, and `serve.yaml`, which is not part of this deployment at all: it launches the whole platform on one EC2 instance, for self-hosting.
 
 **This README describes what each template is for and how the stacks fit together. It deliberately does not restate parameter tables, defaults, or instance sizes.** Those live in each template's own `Parameters:` block, in `.github/configs/graph.yml` (graph tiers), and in the GitHub Actions variables the deploy workflows pass in (`just gha-list`). Template defaults are frequently *not* what an environment runs — sizing is overridden per environment by workflow inputs — so a restated default here is worse than no value at all.
 
@@ -28,6 +28,7 @@ Infrastructure as Code for deploying RoboSystems to AWS. All templates are deplo
 | `worker.yaml` | Background task worker | `deploy-dagster.yml` (same job) | Dagster (cluster + SG), Postgres, Valkey, S3 |
 | `prometheus.yaml` | Metrics collection | `deploy-prometheus.yml` | None |
 | `grafana.yaml` | Dashboards | `deploy-grafana.yml` | None |
+| `serve.yaml` | RoboSystems Serve: the compose stack on one EC2 instance, self-hosted ([guide](../docs/technical/Self-Hosting-on-a-Server.md)) | `just serve launch` (local) | None |
 
 Five templates have no workflow of their own and ride a sibling's: `waf.yaml` and `audit.yaml` deploy from `deploy-api.yml`, `cloudtrail.yaml` and `security.yaml` from `deploy-vpc.yml`, and `worker.yaml` from `deploy-dagster.yml`.
 

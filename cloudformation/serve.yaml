@@ -1,0 +1,641 @@
+Description: RoboSystems Serve - The Platform on One EC2 Instance
+
+# The shape in docs/technical/Self-Hosting-on-a-Server.md, launched by one
+# stack (`just serve`). Unlike every other template here it is not part of the
+# platform's own deployment and no workflow deploys it: it runs the compose
+# stack on the published images, in whichever account launches it. It runs the
+# development environment profile (ENVIRONMENT=dev), so:
+#   - Port 443 is open to AllowedCidr only. The object store's keys are the same
+#     on every installation and registration is open until the operator closes
+#     it, so the stack must not face the internet as it stands.
+#   - Port 80 is open to the world, for the certificate challenge and the
+#     redirect to HTTPS; Caddy serves nothing else on it.
+#   - Mail goes to Mailpit on the instance and is delivered nowhere.
+#   - Upgrade in place with `robosystems-upgrade <tag>`, not by changing the
+#     release parameters: user data runs once, and a stack update that changes
+#     it restarts or replaces the instance.
+# Everything that must survive the instance is on the data volume, mounted at
+# /data: the checkout and its .env, the graph files, Docker's volumes and
+# Caddy's certificates. Deleting the stack leaves a final snapshot of it, and
+# DataVolumeSnapshotId starts a new stack from one.
+
+Parameters:
+  # Infrastructure & Networking Configuration
+  VpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: VPC ID where the instance will be deployed
+  PublicSubnetId:
+    Type: AWS::EC2::Subnet::Id
+    Description: Public subnet ID for the instance (must have internet gateway access)
+  AllowedCidr:
+    Type: String
+    Description: Address range allowed to reach the stack on 443 (e.g., 203.0.113.7/32)
+    AllowedPattern: ^(\d{1,3}\.){3}\d{1,3}/\d{1,2}$
+    ConstraintDescription: Must be an IPv4 CIDR range
+
+  # Domain Configuration
+  HostedZoneId:
+    Type: AWS::Route53::HostedZone::Id
+    Description: Public Route 53 hosted zone that holds DomainName
+  DomainName:
+    Type: String
+    Description: Base name (e.g., serve.example.com); the stack serves api., app., ledger., investor. and s3. under it
+    AllowedPattern: ^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$
+    ConstraintDescription: Must be a lowercase DNS name
+
+  # Instance Configuration
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Amazon Linux 2023 ARM64 AMI ID (resolved from SSM Parameter Store)
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
+  InstanceType:
+    Type: String
+    Description: EC2 instance type (ARM64/Graviton, 32 GB or more; the container memory caps total about 26 GB)
+    Default: r7g.xlarge
+    AllowedValues:
+      - r7g.xlarge
+      - r7g.2xlarge
+      - m7g.2xlarge
+      - r8g.xlarge
+      - r8g.2xlarge
+      - m8g.2xlarge
+    ConstraintDescription: Must be a valid ARM64 instance type with at least 32 GB
+  DataVolumeSize:
+    Type: Number
+    Description: Size of the data volume in GiB
+    Default: 100
+    MinValue: 50
+  DataVolumeSnapshotId:
+    Type: String
+    Description: Snapshot of an earlier data volume to start from (leave empty for a new volume)
+    Default: ""
+
+  # Release Configuration
+  RobosystemsVersion:
+    Type: String
+    Description: Platform release to run (e.g., v1.24.7); its image must be published
+    AllowedPattern: ^v\d+\.\d+\.\d+$
+    ConstraintDescription: Must be a release tag such as v1.24.7
+  RobosystemsAppVersion:
+    Type: String
+    Description: RoboSystems app image tag
+    Default: latest
+    AllowedPattern: ^(latest|v\d+\.\d+\.\d+)$
+    ConstraintDescription: Must be latest or a release tag
+  RoboledgerAppVersion:
+    Type: String
+    Description: RoboLedger app image tag
+    Default: latest
+    AllowedPattern: ^(latest|v\d+\.\d+\.\d+)$
+    ConstraintDescription: Must be latest or a release tag
+  RoboinvestorAppVersion:
+    Type: String
+    Description: RoboInvestor app image tag
+    Default: latest
+    AllowedPattern: ^(latest|v\d+\.\d+\.\d+)$
+    ConstraintDescription: Must be latest or a release tag
+
+  # AI Operator Configuration
+  AnthropicApiKey:
+    Type: String
+    Description: Anthropic API key for the server-side operators, kept in the stack's settings secret (leave empty to leave them unconfigured)
+    NoEcho: true
+    Default: ""
+
+  # Tagging Configuration
+  ServiceTag:
+    Type: String
+    Description: Service tag for resource identification and billing
+    Default: RoboSystems
+  ComponentTag:
+    Type: String
+    Description: Component tag for resource identification and billing
+    Default: Serve
+
+Conditions:
+  HasAnthropicKey: !Not [!Equals [!Ref AnthropicApiKey, ""]]
+  HasSnapshot: !Not [!Equals [!Ref DataVolumeSnapshotId, ""]]
+
+Resources:
+  # Security group: HTTPS from the allowed range, HTTP for the certificate challenge
+  ServeSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Retain
+    Properties:
+      GroupDescription: RoboSystems Serve - HTTPS from the allowed range, HTTP for the certificate challenge
+      VpcId: !Ref VpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: !Ref AllowedCidr
+          Description: The stack, through Caddy
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+          Description: Certificate challenge and redirect to HTTPS
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-sg
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # The apps call the API and the object store by their public names from
+  # inside the instance, and that traffic arrives from its own public address
+  ServeSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref ServeSecurityGroup
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: !Sub ${ServeElasticIp}/32
+      Description: The instance reaching its own names
+
+  # Settings: a JSON object of .env overrides the instance applies at boot and
+  # on `just serve set`, so a secret never travels in user data or a command
+  ServeSettingsSecret:
+    Type: AWS::SecretsManager::Secret
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      Description: !Sub Settings for ${AWS::StackName}, written into its .env
+      SecretString: !If
+        - HasAnthropicKey
+        - !Sub '{"ANTHROPIC_API_ENABLED":"true","ANTHROPIC_API_KEY":"${AnthropicApiKey}"}'
+        - "{}"
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-settings
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # IAM role for the instance: Session Manager, and its own settings secret
+  ServeInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/AmazonSSMManagedInstanceCore
+      Policies:
+        - PolicyName: ReadSettings
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: secretsmanager:GetSecretValue
+                Resource: !Ref ServeSettingsSecret
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-instance-role
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  ServeInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ServeInstanceRole
+
+  # The boot script signals this handle when the API answers, or when it fails
+  ServeReadyHandle:
+    Type: AWS::CloudFormation::WaitConditionHandle
+
+  # The instance: stock Amazon Linux, Docker, and the compose stack
+  ServeInstance:
+    Type: AWS::EC2::Instance
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      # No KeyName - access via SSM only (no SSH)
+      IamInstanceProfile: !Ref ServeInstanceProfile
+      SubnetId: !Ref PublicSubnetId
+      SecurityGroupIds:
+        - !Ref ServeSecurityGroup
+      # One hop: the host reads its role, the containers cannot
+      MetadataOptions:
+        HttpEndpoint: enabled
+        HttpTokens: required
+        HttpPutResponseHopLimit: 1
+      BlockDeviceMappings:
+        - Ebs:
+            VolumeType: gp3
+            VolumeSize: 30
+            Encrypted: true
+            DeleteOnTermination: true
+          DeviceName: /dev/xvda
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+      UserData: !Base64
+        Fn::Sub:
+          - |
+            #!/bin/bash
+            set -Eeuo pipefail
+            exec > >(tee -a /var/log/robosystems-bootstrap.log) 2>&1
+            export HOME=/root
+
+            HANDLE='${ServeReadyHandle}'
+            DOMAIN='${DomainName}'
+            APP=/data/robosystems
+
+            signal() {
+              curl -sS -X PUT -H 'Content-Type:' \
+                --data-binary "{\"Status\":\"$1\",\"Reason\":\"$2\",\"UniqueId\":\"bootstrap\",\"Data\":\"$2\"}" \
+                "$HANDLE" || true
+            }
+            die() {
+              echo "bootstrap: $*" >&2
+              signal FAILURE "$*"
+              exit 1
+            }
+            trap 'signal FAILURE "bootstrap failed at line $LINENO, see /var/log/robosystems-bootstrap.log"' ERR
+
+            # The elastic IP is associated after the instance starts; nothing
+            # outside the VPC answers until then.
+            for _ in $(seq 1 60); do
+              curl -sf -o /dev/null --max-time 5 https://github.com && break
+              sleep 5
+            done
+            curl -sf -o /dev/null --max-time 5 https://github.com || die "no route to the internet from this subnet"
+
+            dnf install -y docker git jq
+
+            # The data volume is attached after the instance exists. It is the
+            # one disk that does not hold the root filesystem.
+            ROOT_DISK=$(lsblk -no PKNAME "$(findmnt -no SOURCE /)")
+            DATA_DISK=""
+            for _ in $(seq 1 120); do
+              DATA_DISK=$(lsblk -dno NAME,TYPE | awk -v root="$ROOT_DISK" '$2 == "disk" && $1 != root { print $1; exit }')
+              [ -n "$DATA_DISK" ] && break
+              sleep 5
+            done
+            [ -n "$DATA_DISK" ] || die "the data volume never appeared"
+            DATA_DEV="/dev/$DATA_DISK"
+            # A volume restored from a snapshot already has its filesystem.
+            blkid "$DATA_DEV" >/dev/null 2>&1 || mkfs.xfs "$DATA_DEV"
+            DATA_UUID=$(blkid -s UUID -o value "$DATA_DEV")
+            mkdir -p /data
+            grep -q "$DATA_UUID" /etc/fstab || echo "UUID=$DATA_UUID /data xfs defaults,nofail 0 2" >>/etc/fstab
+            mountpoint -q /data || mount /data
+
+            # OpenSearch refuses to start below this.
+            echo 'vm.max_map_count=262144' >/etc/sysctl.d/99-opensearch.conf
+            sysctl --system >/dev/null
+
+            # Docker keeps its images and named volumes on the data volume, and
+            # waits for the mount on every boot.
+            mkdir -p /etc/docker /data/docker /etc/systemd/system/docker.service.d /usr/local/lib/docker/cli-plugins
+            echo '{"data-root": "/data/docker", "log-driver": "json-file", "log-opts": {"max-size": "50m", "max-file": "5"}}' >/etc/docker/daemon.json
+            printf '[Unit]\nRequiresMountsFor=/data\n' >/etc/systemd/system/docker.service.d/data.conf
+            curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
+              https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64
+            chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+            systemctl daemon-reload
+            systemctl enable --now docker
+
+            if [ ! -d "$APP/.git" ]; then
+              git clone https://github.com/RoboFinSystems/robosystems.git "$APP"
+              git -C "$APP" switch --detach '${RobosystemsVersion}'
+            fi
+            git config --global --add safe.directory "$APP"
+            cd "$APP"
+
+            # Where the settings come from, for robosystems-apply-settings.
+            cat >/etc/robosystems-serve.conf <<EOF
+            SETTINGS_SECRET='${SettingsSecretArn}'
+            SERVE_REGION='${AWS::Region}'
+            EOF
+
+            # Shared by this script and robosystems-apply-settings.
+            mkdir -p /usr/local/lib
+            cat >/usr/local/lib/robosystems-serve.sh <<'EOF'
+            APP=/data/robosystems
+            # set_env KEY VALUE: the first assignment of KEY in .env, commented
+            # or not, becomes KEY=VALUE; a key .env does not name is appended.
+            set_env() {
+              KEY="$1" VALUE="$2" awk '
+                BEGIN { key = ENVIRON["KEY"]; value = ENVIRON["VALUE"]; pattern = "^#? ?" key "=" }
+                !done && $0 ~ pattern { print key "=" value; done = 1; next }
+                { print }
+                END { if (!done) print key "=" value }
+              ' "$APP/.env" >"$APP/.env.next"
+              cat "$APP/.env.next" >"$APP/.env"
+              rm "$APP/.env.next"
+            }
+            EOF
+            . /usr/local/lib/robosystems-serve.sh
+
+            cat >/usr/local/bin/robosystems-apply-settings <<'EOF'
+            #!/bin/bash
+            # Writes the stack's settings secret into .env, then recreates the
+            # containers whose settings changed. --no-restart only writes.
+            set -euo pipefail
+            export HOME=/root
+            . /etc/robosystems-serve.conf
+            . /usr/local/lib/robosystems-serve.sh
+            cd "$APP"
+            SETTINGS=$(aws secretsmanager get-secret-value --region "$SERVE_REGION" \
+              --secret-id "$SETTINGS_SECRET" --query SecretString --output text)
+            while IFS= read -r KEY; do
+              set_env "$KEY" "$(jq -r --arg key "$KEY" '.[$key]' <<<"$SETTINGS")"
+            done < <(jq -r 'keys[]' <<<"$SETTINGS")
+            # A key for the Anthropic API replaces the placeholder Bedrock keys.
+            if jq -e 'has("ANTHROPIC_API_KEY")' <<<"$SETTINGS" >/dev/null; then
+              sed -i -E 's/^(AWS_BEDROCK_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)=your-)/# \1/' .env
+            fi
+            echo "applied $(jq -r 'keys | length' <<<"$SETTINGS") setting(s)"
+            if [ "$#" -gt 0 ] && [ "$1" = "--no-restart" ]; then
+              exit 0
+            fi
+            docker compose -f compose.yaml --env-file .env --profile all up --detach
+            EOF
+            chmod +x /usr/local/bin/robosystems-apply-settings
+
+            # A data volume that already carries a .env keeps it: its secrets
+            # are the ones the databases on the same volume were created with.
+            if [ ! -f .env ]; then
+              cp .env.example .env
+              chmod 600 .env
+              set_env ROBOSYSTEMS_IMAGE 'robofinsystems/robosystems:${RobosystemsVersion}'
+              set_env ROBOSYSTEMS_APP_IMAGE 'robofinsystems/robosystems-app:${RobosystemsAppVersion}'
+              set_env ROBOLEDGER_APP_IMAGE 'robofinsystems/roboledger-app:${RoboledgerAppVersion}'
+              set_env ROBOINVESTOR_APP_IMAGE 'robofinsystems/roboinvestor-app:${RoboinvestorAppVersion}'
+              set_env ROBOSYSTEMS_API_URL "https://api.$DOMAIN"
+              set_env ROBOSYSTEMS_URL "https://app.$DOMAIN"
+              set_env ROBOLEDGER_URL "https://ledger.$DOMAIN"
+              set_env ROBOINVESTOR_URL "https://investor.$DOMAIN"
+              set_env AWS_S3_PRESIGN_ENDPOINT_URL "https://s3.$DOMAIN"
+              set_env INTUIT_REDIRECT_URI "https://ledger.$DOMAIN/connections/qb-callback"
+              set_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
+              set_env ADMIN_API_KEY "$(openssl rand -hex 32)"
+              set_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
+              set_env VALKEY_AUTH_TOKEN "$(openssl rand -hex 24)"
+            fi
+            robosystems-apply-settings --no-restart
+
+            # The platform image runs as its own user. Left to Docker, the
+            # directories compose mounts from the checkout are created as root,
+            # and the Graph API cannot create a database in them.
+            PLATFORM_IMAGE=$(grep -E '^ROBOSYSTEMS_IMAGE=' .env | cut -d= -f2)
+            PLATFORM_UID=$(docker run --rm --entrypoint id "$PLATFORM_IMAGE" -u)
+            PLATFORM_GID=$(docker run --rm --entrypoint id "$PLATFORM_IMAGE" -g)
+            mkdir -p data/lbug-dbs data/staging data/artifacts data/lance dagster_home/storage
+            chown -R "$PLATFORM_UID:$PLATFORM_GID" data dagster_home
+
+            # Caddy on the host network reaches the loopback ports the stack
+            # publishes, and gets a public certificate for each name by itself.
+            mkdir -p /data/caddy/data /data/caddy/config
+            cat >/data/caddy/Caddyfile <<EOF
+            api.$DOMAIN {
+              reverse_proxy 127.0.0.1:8000 {
+                flush_interval -1
+              }
+            }
+            app.$DOMAIN {
+              reverse_proxy 127.0.0.1:3000
+            }
+            ledger.$DOMAIN {
+              reverse_proxy 127.0.0.1:3001
+            }
+            investor.$DOMAIN {
+              reverse_proxy 127.0.0.1:3002
+            }
+            s3.$DOMAIN {
+              reverse_proxy 127.0.0.1:8333
+            }
+            EOF
+            docker rm -f caddy >/dev/null 2>&1 || true
+            docker run --detach --name caddy --restart always --network host \
+              -v /data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
+              -v /data/caddy/data:/data -v /data/caddy/config:/config \
+              caddy:2
+
+            cat >/usr/local/bin/robosystems-upgrade <<'EOF'
+            #!/bin/bash
+            # robosystems-upgrade v1.25.0|latest [--dry-run]
+            # Moves the platform image and the checkout to a release. The apps
+            # stay on the tags pinned in /data/robosystems/.env.
+            export HOME=/root
+            cd /data/robosystems && PROFILE=all exec bin/tools/upgrade-to.sh "$@"
+            EOF
+            chmod +x /usr/local/bin/robosystems-upgrade
+
+            docker compose -f compose.yaml --env-file .env --profile all up --detach
+
+            for _ in $(seq 1 180); do
+              curl -sf -o /dev/null http://127.0.0.1:8000/v1/status && break
+              sleep 10
+            done
+            curl -sf -o /dev/null http://127.0.0.1:8000/v1/status || die "the API did not answer within 30 minutes"
+            signal SUCCESS "ready"
+          - SettingsSecretArn: !Ref ServeSettingsSecret
+
+  # Fixed public address for the five names
+  ServeElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-eip
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  ServeElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ServeElasticIp.AllocationId
+      InstanceId: !Ref ServeInstance
+
+  # Data volume: everything that must outlive the instance. Deleting the stack
+  # leaves a final snapshot
+  ServeDataVolume:
+    Type: AWS::EC2::Volume
+    DeletionPolicy: Snapshot
+    UpdateReplacePolicy: Snapshot
+    Properties:
+      AvailabilityZone: !GetAtt ServeInstance.AvailabilityZone
+      Size: !Ref DataVolumeSize
+      VolumeType: gp3
+      Encrypted: true
+      SnapshotId: !If [HasSnapshot, !Ref DataVolumeSnapshotId, !Ref AWS::NoValue]
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-data
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+        - Key: robosystems:serve-backup
+          Value: !Ref AWS::StackName
+
+  ServeDataVolumeAttachment:
+    Type: AWS::EC2::VolumeAttachment
+    Properties:
+      Device: /dev/sdf
+      InstanceId: !Ref ServeInstance
+      VolumeId: !Ref ServeDataVolume
+
+  # DNS: five names under DomainName, all on the instance's address
+  ServeDnsRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref HostedZoneId
+      RecordSets:
+        - Name: !Sub api.${DomainName}.
+          Type: A
+          TTL: "300"
+          ResourceRecords:
+            - !Ref ServeElasticIp
+        - Name: !Sub app.${DomainName}.
+          Type: A
+          TTL: "300"
+          ResourceRecords:
+            - !Ref ServeElasticIp
+        - Name: !Sub ledger.${DomainName}.
+          Type: A
+          TTL: "300"
+          ResourceRecords:
+            - !Ref ServeElasticIp
+        - Name: !Sub investor.${DomainName}.
+          Type: A
+          TTL: "300"
+          ResourceRecords:
+            - !Ref ServeElasticIp
+        - Name: !Sub s3.${DomainName}.
+          Type: A
+          TTL: "300"
+          ResourceRecords:
+            - !Ref ServeElasticIp
+
+  # IAM role for the snapshot schedule
+  ServeBackupRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: dlm.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/service-role/AWSDataLifecycleManagerServiceRole
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackName}-backup-role
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: !Ref ComponentTag
+        - Key: CreatedBy
+          Value: CloudFormation
+
+  # Daily snapshot of the data volume, seven kept. Each is taken while the
+  # stack runs, so it is what a power cut would leave: the databases recover
+  # from it on start
+  ServeBackupPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: !Sub Daily snapshot of the ${AWS::StackName} data volume
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt ServeBackupRole.Arn
+      PolicyDetails:
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          - Key: robosystems:serve-backup
+            Value: !Ref AWS::StackName
+        Schedules:
+          - Name: daily
+            CopyTags: true
+            CreateRule:
+              Interval: 24
+              IntervalUnit: HOURS
+              Times:
+                - "08:00"
+            RetainRule:
+              Count: 7
+
+  # The stack completes when the boot script reports the API answering
+  ServeReady:
+    Type: AWS::CloudFormation::WaitCondition
+    DependsOn:
+      - ServeDataVolumeAttachment
+      - ServeElasticIpAssociation
+      - ServeDnsRecords
+    Properties:
+      Handle: !Ref ServeReadyHandle
+      Timeout: "2700"
+
+Outputs:
+  ApiUrl:
+    Description: The API
+    Value: !Sub https://api.${DomainName}
+    Export:
+      Name: !Sub ${AWS::StackName}-ApiUrl
+
+  AppUrl:
+    Description: The RoboSystems app; sign-in happens here and carries over to the other two
+    Value: !Sub https://app.${DomainName}
+    Export:
+      Name: !Sub ${AWS::StackName}-AppUrl
+
+  LedgerUrl:
+    Description: The RoboLedger app
+    Value: !Sub https://ledger.${DomainName}
+
+  InvestorUrl:
+    Description: The RoboInvestor app
+    Value: !Sub https://investor.${DomainName}
+
+  InstanceId:
+    Description: Instance ID (use with SSM)
+    Value: !Ref ServeInstance
+    Export:
+      Name: !Sub ${AWS::StackName}-InstanceId
+
+  DataVolumeId:
+    Description: Volume ID of the data volume
+    Value: !Ref ServeDataVolume
+    Export:
+      Name: !Sub ${AWS::StackName}-DataVolumeId
+
+  SSMConnectCommand:
+    Description: SSM command to open a shell on the instance; the boot log is /var/log/robosystems-bootstrap.log
+    Value: !Sub aws ssm start-session --target ${ServeInstance} --region ${AWS::Region}

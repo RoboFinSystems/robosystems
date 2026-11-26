@@ -1,6 +1,6 @@
 # Self-Hosting on a Server
 
-Run the stack on one machine on your own network and reach it from the others: a hostname, a certificate, one open port, users and API keys, and MCP clients on laptops. [Local Development](Local-Development.md) puts the stack on your own laptop and the [Bootstrap Guide](Bootstrap-Guide.md) deploys the platform into your own AWS account. This page is the shape between them. It describes what works today and ends with what still takes work by hand.
+Run the stack on one machine on your own network and reach it from the others: a hostname, a certificate, one open port, users and API keys, and MCP clients on laptops. [Local Development](Local-Development.md) puts the stack on your own laptop and the [Bootstrap Guide](Bootstrap-Guide.md) deploys the platform into your own AWS account. This page is the shape between them. It describes what works today and ends with what still takes work by hand. On AWS, [one template](#on-aws-from-one-template) does the steps on this page for you.
 
 ## What This Shape Is
 
@@ -123,12 +123,49 @@ Then set `SSL_CERT_FILE=/path/to/ca-bundle.pem` in `.env.local`, which the `just
 
 The operators, the server-side AI, call Claude through AWS Bedrock by default and can be pointed at any server that implements the OpenAI Chat Completions API with tool calling, on the same machine or on another one on your network. [Self-Hosted AI Models](Self-Hosted-AI-Models.md) has the settings, which models have been tested, and what to check before pointing one at real books.
 
+## On AWS, From One Template
+
+RoboSystems Serve is this page as one CloudFormation stack: `cloudformation/serve.yaml` starts one EC2 instance in your own AWS account and does the steps above on it. From a checkout:
+
+```bash
+aws sso login --profile my-account
+just serve launch
+```
+
+It asks three things: which AWS CLI profile (the account to launch into), the base name, and the address range allowed to reach the stack, where `me` is the machine you run it from. The base name has to sit in a public Route 53 hosted zone of that account, which the command finds from the name. Then it shows the account and what it will create, and asks before launching. The same three can be given as arguments instead, `just serve launch my-account serve.example.com me`. The account is always named or chosen and never read from the shell's own credentials, so a terminal signed in to another account cannot receive the stack. The stack is complete when the API answers, usually within fifteen minutes, and its outputs are the addresses.
+
+**What the stack creates.** One ARM instance with 32 GB of memory on Amazon Linux 2023, reached through Session Manager, with no SSH. A separate encrypted data volume, mounted at `/data`, that holds the checkout and its `.env`, the graph files, Docker's volumes and the certificates. An Elastic IP and five DNS records under your base name: `api`, `app`, `ledger`, `investor` and `s3`. Caddy on the instance gets a public certificate for each name by itself. The JWT secret, the admin key and the PostgreSQL and Valkey passwords are generated on the instance at first boot. The platform runs the newest release whose image is published, and the three apps their latest images; `ROBOSYSTEMS_VERSION` picks another release at launch, and the other launch settings are listed at the top of `bin/tools/serve.sh`.
+
+**Reaching it.** Port 443 is open to the range you gave and to nothing else. That is what this shape is: one operator's own deployment, reached from their own network. The object store's credentials are the same on every installation ([Limits Today](#limits-today)) and registration starts open, so it is not built to face the internet; a deployment a team or a client reaches from anywhere is what the hosted platform is for. Port 80 is open to the world for the certificate challenge and the redirect to HTTPS. Everything under [Users and API Keys](#users-and-api-keys) and [Clients on Laptops](#clients-on-laptops) applies as written, with public certificates, so no laptop needs a root installed.
+
+**Running it.** The instance is yours to run, and `just serve` is how: `launch` remembers the profile, region and stack in `.local/serve.json`, and every other command acts on that stack through Systems Manager, so nothing on the instance listens for administration.
+
+| Command | What it does |
+| --- | --- |
+| `just serve status` | The release running, each container's state, disk and memory |
+| `just serve upgrade v1.25.0` | Moves the platform to a release (`latest` is the default) and waits for the API to report it; it is `just upgrade-to` on the instance |
+| `just serve logs api` | The last lines of one service's log; a second argument is how many |
+| `just serve restart worker` | Restarts one service, or every service with no argument |
+| `just serve reboot` | Reboots the instance; the containers start by themselves |
+| `just serve snapshot` | Snapshots the data volume now, before an upgrade for instance |
+| `just serve set KEY` | Changes a setting in `.env` and recreates the containers that read it |
+| `just serve tunnel dagster` | Forwards the Dagster UI to `http://127.0.0.1:18002`; `mailpit` forwards the inbox to `18025` |
+| `just serve shell` | A shell on the instance |
+
+`set` asks for the value without showing it, or takes it as a second argument. Either way the value goes to a Secrets Manager secret in your account and the instance reads it from there, so a key is never in a command's text or in Systems Manager's history. Change releases with `upgrade` and not through the stack's parameters, which apply at first launch only.
+
+The data volume is also snapshotted daily, seven kept. A snapshot is taken while the stack runs, so it is what a power cut would leave and the databases recover from it on start. Deleting the stack leaves a final snapshot, and `SNAPSHOT_ID=snap-... just serve launch` starts a new stack from one. The instance, the volume and the address bill until the stack is deleted.
+
+**The operators.** Set `ANTHROPIC_API_KEY` in your environment when you launch, or run `just serve set ANTHROPIC_API_KEY` and `just serve set ANTHROPIC_API_ENABLED true` afterwards, and the server-side operators run on the Anthropic API. Without a key the operators stay unconfigured and everything else works.
+
 ## Limits Today
 
 What this shape does not do yet, and what to do about it:
 
 - **Service ports listen on the loopback address only** (`127.0.0.1`): 8000, 8001, 8002, 5432, 6379, 8333, 1025, 8025 and 9200 in the `robosystems` profile, 3000 to 3002 with the apps, and 4318, 8889, 9090 and 4000 with observability. Users reach the stack through the proxy and nothing else. To open the Dagster UI or Mailpit from another machine, forward the port over ssh (`ssh -L 8002:127.0.0.1:8002 <server>`) rather than publishing it.
 - **The object store's credentials are fixed.** The S3 identity the stack uses (`test`/`test`) is the same on every installation, and the public-data bucket allows anonymous reads, which the browser needs. The keys are set in four places that must agree: `bin/setup/seaweedfs-s3.json`, `.env`, `.env.local` (the `just` recipes run on the host), and the `storage-init` service's environment in `compose.yaml`, which the backend services wait on. Change all four before exposing the box beyond a trusted network (the two tracked files then count as local changes, which `just upgrade-to` refuses to run over until they are committed or stashed), and keep port 8333 behind the host firewall like the others.
+- **On a Linux server, the data directories need an owner before the first start.** The platform image runs as its own user (uid 1000), and Docker creates the directories that `compose.yaml` mounts from the checkout as root, so the first graph creation fails with a permission error. Before `just start`, run `mkdir -p data/lbug-dbs data/staging data/artifacts data/lance dagster_home/storage` and `sudo chown -R 1000:1000 data dagster_home`. Docker Desktop on a Mac hides file ownership and needs neither. The AWS template does this itself.
+- **Company search in the RoboInvestor app finds nothing.** The app reads its filing catalog from the stack's own public-data bucket, which is empty unless the SEC pipeline has run on the box.
 - **Outbound access the box needs**: Docker Hub for image pulls, the model endpoint if it is not on the box, and the APIs of any connector you turn on.
 
 ## Related Documentation
