@@ -401,6 +401,8 @@ Resources:
               set_env ROBOINVESTOR_URL "https://investor.$DOMAIN"
               set_env AWS_S3_PRESIGN_ENDPOINT_URL "https://s3.$DOMAIN"
               set_env INTUIT_REDIRECT_URI "https://ledger.$DOMAIN/connections/qb-callback"
+              # No SEC pipeline runs here, so the filing catalog is the hosted one.
+              set_env FILINGS_CDN_URL https://public.robosystems.ai
               set_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
               set_env ADMIN_API_KEY "$(openssl rand -hex 32)"
               set_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
