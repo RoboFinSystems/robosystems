@@ -237,7 +237,7 @@ agedPayables(asOf: Date, entityId: String, scope: String = "entity"): AgedBalanc
 curl -X POST "https://api.robosystems.ai/extensions/$GRAPH_ID/graphql" \
   -H "X-API-Key: $ROBOSYSTEMS_API_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"query": "{ agedReceivables(asOf: \"2026-10-31\") { asOf buckets { currentCents oneToThirtyCents thirtyOneToSixtyCents sixtyOneToNinetyCents overNinetyCents unappliedCreditCents totalCents } agents { agentName openItemCount oldestDueDate buckets { totalCents } } defaultedDueDateCount tieOuts { entityId accounts { code name } controlBalanceCents openItemsCents differenceCents } } }"}'
+  -d '{"query": "{ agedReceivables(asOf: \"2026-10-31\") { asOf buckets { currentCents oneToThirtyCents thirtyOneToSixtyCents sixtyOneToNinetyCents overNinetyCents unappliedCreditCents totalCents } agents { agentName openItemCount oldestDueDate buckets { totalCents } } defaultedDueDateCount tieOuts { entityId accounts { code name } controlBalanceCents pendingCloseCents openItemsCents differenceCents } } }"}'
 ```
 
 A response looks like this:
@@ -276,6 +276,7 @@ A response looks like this:
           "entityId": "ent_…",
           "accounts": [{ "code": "1200", "name": "Accounts Receivable" }],
           "controlBalanceCents": 662500,
+          "pendingCloseCents": 0,
           "openItemsCents": 650000,
           "differenceCents": -12500
         }
@@ -294,10 +295,13 @@ Each `ControlTieOut` sets one entity's open items against its control accounts a
 | `entityId` | The entity compared |
 | `accounts` | `[ControlAccount]` (`elementId`, `code`, `name`): the entity's accounts mapped to `rs-gaap:ReceivablesNetCurrent` (receivables) or `rs-gaap:AccountsPayableCurrent` (payables) in its book mapping, and any account whose QuickBooks account type is Accounts Receivable or Accounts Payable |
 | `controlBalanceCents` | Those accounts' posted balance at `asOf` (entries posted, or posted and reversed, with a posting date on or before it), in the natural sign: debit for receivables, credit for payables. `null` when the entity has no control account |
+| `pendingCloseCents` | What the close will post to those accounts from documents the open items already count: draft entries dated on or before `asOf` whose event is committed or fulfilled, such as a payment committed in a month still open, in the natural sign `controlBalanceCents` uses (so a payment is negative); `0` with no control account |
 | `openItemsCents` | The entity's open items at `asOf`, intercompany included |
-| `differenceCents` | `openItemsCents` less `controlBalanceCents`; `null` with no control account |
+| `differenceCents` | `openItemsCents` less `controlBalanceCents` and `pendingCloseCents`; `null` with no control account |
 
-A difference is never plugged. It is everything that moved the accounts without a document behind it, or a document whose entry has not posted: a write-off journal, a payment not linked to its document, an opening balance, a settling bank line classified to another account, or a payment committed this month whose draft posts at the close. In the example above, the account holds $125 more than the open items. The app shows a tie-out without control accounts as *No control account mapped*; mapping one account to the concept fixes it (see [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)).
+A difference is never plugged. It is everything that moved the accounts without a document behind it: a write-off journal, a payment not linked to its document, an opening balance, or a settling bank line classified to another account.
+
+A document whose entry is still a draft is not a difference. The open items count a committed payment at once, while its entry posts only when the month closes; that entry is `pendingCloseCents`, and the two tie before the close. A draft whose event was voided never posts, so it is not pending. In the example above, the account holds $125 more than the open items. The app shows a tie-out without control accounts as *No control account mapped*; mapping one account to the concept fixes it (see [Chart of Accounts Mapping](Chart-of-Accounts-Mapping.md)).
 
 ## A Group's Receivables and Payables
 
