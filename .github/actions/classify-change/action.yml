@@ -28,6 +28,12 @@ inputs:
     description: Comment text that triggers the automated review
     required: false
     default: "@claude please review this PR"
+  review_refusal_marker:
+    description: >-
+      Text the reviewer answers a request with when it declines to run because
+      the pull request changed after the request was posted
+    required: false
+    default: "was updated after the trigger"
   review_timeout_minutes:
     description: How long to wait for the finished review to be posted before failing
     required: false
@@ -56,6 +62,7 @@ runs:
         PR: ${{ inputs.pr_number }}
         REVIEWER: ${{ inputs.reviewer_login }}
         REVIEW_REQUEST: ${{ inputs.review_request }}
+        REFUSAL_MARKER: ${{ inputs.review_refusal_marker }}
         TIMEOUT_MIN: ${{ inputs.review_timeout_minutes }}
         EXTRA_STANDARD: ${{ inputs.extra_standard_regex }}
       run: |
@@ -144,27 +151,44 @@ runs:
           gh api "repos/$REPO/issues/$PR/comments" --paginate \
             --jq "[.[] | select(.user.login == \"$REVIEWER\") | select(.body | startswith(\"**Claude finished\"))] | length"
         }
-        has_request() {
-          gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq "[.[] | select(.body | contains(\"$REVIEW_REQUEST\"))] | length"
+        # A request is outstanding until the reviewer declines it: a push or an
+        # edit that lands just after the request makes the reviewer refuse to
+        # run, and waiting on that request would wait for nothing.
+        needs_request() {
+          gh api "repos/$REPO/issues/$PR/comments" --paginate --jq '.[]' | jq -rs \
+            --arg reviewer "$REVIEWER" --arg request "$REVIEW_REQUEST" --arg refusal "$REFUSAL_MARKER" '
+              ([.[] | select(.body | contains($request)) | .created_at] | max) as $asked
+              | ([.[] | select(.user.login == $reviewer) | select(.body | contains($refusal)) | .created_at] | max) as $declined
+              | if $asked == null or ($declined != null and $declined > $asked) then "yes" else "no" end'
+        }
+        request_review() {
+          if [ -z "$REVIEW_TOKEN" ]; then
+            echo "::error::No outstanding review request on #$PR and no review token available to post one. Comment '$REVIEW_REQUEST' on the pull request, then re-run this job."
+            exit 1
+          fi
+          GH_TOKEN="$REVIEW_TOKEN" gh pr comment "$PR" --repo "$REPO" --body "$REVIEW_REQUEST" >/dev/null
+          echo "Requested the automated review on #$PR."
         }
         if [ "$(has_review)" -gt 0 ]; then
           echo "Review by $REVIEWER already on the pull request."
           exit 0
         fi
-        if [ "$(has_request)" -eq 0 ]; then
-          if [ -z "$REVIEW_TOKEN" ]; then
-            echo "::error::No review request on #$PR and no review token available to post one. Comment '$REVIEW_REQUEST' on the pull request, then re-run this job."
-            exit 1
-          fi
-          GH_TOKEN="$REVIEW_TOKEN" gh pr comment "$PR" --repo "$REPO" --body "$REVIEW_REQUEST" >/dev/null
-          echo "Requested the automated review on #$PR."
+        requests=0
+        if [ "$(needs_request)" = "yes" ]; then
+          request_review
+          requests=1
         fi
         deadline=$(( $(date +%s) + TIMEOUT_MIN * 60 ))
         while [ "$(date +%s)" -lt "$deadline" ]; do
           if [ "$(has_review)" -gt 0 ]; then
             echo "Review by $REVIEWER posted on #$PR."
             exit 0
+          fi
+          # Declined while we waited: ask again, a bounded number of times.
+          if [ "$requests" -lt 3 ] && [ "$(needs_request)" = "yes" ]; then
+            echo "The reviewer declined the request on #$PR because the pull request changed; asking again."
+            request_review
+            requests=$((requests + 1))
           fi
           sleep 30
         done
