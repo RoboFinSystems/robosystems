@@ -381,6 +381,8 @@ Resources:
               set_env GRAPH_API_MEMORY_LIMIT "$graph"g
               set_env DAGSTER_DAEMON_MEMORY_LIMIT "$daemon"g
               set_env DAGSTER_WEBSERVER_MEMORY_LIMIT 2g
+              # Its default limit of 4 CPUs is refused on the 2 the small size has.
+              set_env DAGSTER_WEBSERVER_CPU_LIMIT 2
               set_env PG_MEMORY_LIMIT "$unit"g
               set_env OPENSEARCH_MEMORY_LIMIT "$unit"g
               set_env OPENSEARCH_JAVA_OPTS "\"-Xms$((unit * 512))m -Xmx$((unit * 512))m\""

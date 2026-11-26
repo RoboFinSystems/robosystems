@@ -342,3 +342,32 @@ class TestUpgradeToDryRun:
     result = run("upgrade-to.sh", "v1.22.0", "--dryrun", cwd=tmp_path)
     assert result.returncode == 2
     assert "usage" in result.stderr
+
+
+def test_serve_loads_and_prints_its_usage():
+  """serve.sh runs on an operator's Mac, whose bash is 3.2. Loading it must
+  run nothing: a heredoc inside ``$(...)`` once ended at a case pattern's
+  parenthesis there, and the script meant for the instance ran on the laptop.
+  """
+  result = run("serve.sh")
+
+  assert result.returncode == 2
+  assert result.stderr.splitlines()[0].lstrip().startswith("just serve launch")
+  assert all(
+    line.lstrip().startswith("just serve") for line in result.stderr.splitlines()
+  )
+  assert result.stdout == ""
+
+
+def test_no_heredoc_inside_a_command_substitution():
+  """The bash 3.2 failure above, caught where CI's newer bash cannot see it."""
+  import re
+
+  opening = re.compile(r"\$\(\s*$")
+  offenders = []
+  for script in sorted(TOOLS.glob("*.sh")):
+    lines = script.read_text().splitlines()
+    for number, line in enumerate(lines[:-1], 1):
+      if opening.search(line) and "<<" in lines[number]:
+        offenders.append(f"{script.name}:{number}")
+  assert not offenders, offenders

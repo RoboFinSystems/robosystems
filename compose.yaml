@@ -122,7 +122,9 @@ services:
       resources:
         limits:
           memory: ${DAGSTER_WEBSERVER_MEMORY_LIMIT:-8g}
-          cpus: "4"
+          # Docker refuses a limit above the host's CPU count, so a 2-CPU
+          # machine lowers this one.
+          cpus: "${DAGSTER_WEBSERVER_CPU_LIMIT:-4}"
         reservations:
           memory: 1g
           cpus: "2"
