@@ -5,7 +5,7 @@ metadata:
   lane: operate
 ---
 
-Run a read-only AWS cost & usage review, then produce a cost report and a prioritized savings plan ranked by dollar impact. Pairs with the `cost-analysis-cur-athena` (the $ side) and `prometheus-usage-amp-cli` (the usage-driver side) runbooks in `local/RoboSystems/runbooks/` for the account-specific query detail — read them alongside this file.
+Run a read-only AWS cost & usage review, then produce a cost report and a prioritized savings plan ranked by dollar impact. Pairs with the `cost-analysis-cur-athena` (the $ side) and `prometheus-usage-amp-cli` (the usage-driver side) runbooks in the private design vault's `runbooks/` for the account-specific query detail — read them alongside this file.
 
 ## Scope & guardrails
 

@@ -29,17 +29,17 @@ from typing import Any
 
 from xbrlkit.deserialize import HolonError, from_holon_report
 from xbrlkit.model import EntityIdentity, FilingMeta, XbrlModel
-from xbrlkit.serve import LoadedFiling, TextSection, ToolError, build_text
-
-# Not in xbrlkit.serve's declared surface; held to the version pin
-# (xbrlkit>=0.20.4,<0.21) until they are exported beside disclosures.
-from xbrlkit.serve.tools import (
+from xbrlkit.serve import (
   DEFAULT_HITS,
   DEFAULT_READ,
   DEFAULT_WINDOW,
   MAX_HITS,
   MAX_READ,
   MAX_WINDOW,
+  LoadedFiling,
+  TextSection,
+  ToolError,
+  build_text,
   describe_filing,
   read_text,
   search_text,

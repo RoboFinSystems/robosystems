@@ -4108,7 +4108,7 @@ requires-dist = [
     { name = "uvicorn", specifier = ">=0.48.0,<1.0" },
     { name = "uvloop", marker = "sys_platform != 'win32'", specifier = ">=0.21.0,<1.0" },
     { name = "webauthn", specifier = ">=2.7.0,<3.0" },
-    { name = "xbrlkit", extras = ["xlsx"], specifier = ">=0.25.4,<0.26.0" },
+    { name = "xbrlkit", extras = ["xlsx"], specifier = ">=0.25.5,<0.26.0" },
     { name = "zstandard", specifier = ">=0.23,<1" },
 ]
 provides-extras = ["dev"]
@@ -4983,7 +4983,7 @@ wheels = [
 
 [[package]]
 name = "xbrlkit"
-version = "0.25.4"
+version = "0.25.5"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "arelle-release" },
@@ -4995,9 +4995,9 @@ dependencies = [
     { name = "regex" },
     { name = "requests" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/98/92/c29ceed1bc71311b7db10c5dd0513cba1c592982f900680f4b4e6f27ba8b/xbrlkit-0.25.4.tar.gz", hash = "sha256:f934e5230adc569349a8f1e14c324aa0421607f1cdb57688c3972edac3f20753", size = 2222364, upload-time = "2026-11-25T20:46:48.313Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/dc/4d/ec91011035b6bb97499eed79bb8cf8e45f2c3d17170a6131dcc641395db2/xbrlkit-0.25.5.tar.gz", hash = "sha256:761b73a3965188bdabd6ee5eef9d7569f8d39a41a2aa79d27987c52b5dc14dcf", size = 2222545, upload-time = "2026-11-26T02:22:48.269Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/ce/11471e63802b5608c4b38bda4a24a5eba9e3f37732911cd938b924a704d2/xbrlkit-0.25.4-py3-none-any.whl", hash = "sha256:99d2d297c5d1b86972974739a7f9457ca90eacfc15a9fe909a024c729924627d", size = 2146090, upload-time = "2026-11-25T20:46:46.219Z" },
+    { url = "https://files.pythonhosted.org/packages/46/ab/0f16ea53e0c8408c03fc670819c19adc3bfbe15ab6b25f3285b3ce009d23/xbrlkit-0.25.5-py3-none-any.whl", hash = "sha256:7c2c4e1b513123f209990b38a09b6f6a02d6ad9eb7407af4fd7254cc9c5bb461", size = 2146222, upload-time = "2026-11-26T02:22:46.376Z" },
 ]
 
 [package.optional-dependencies]
