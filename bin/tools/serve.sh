@@ -10,6 +10,7 @@
 #   bin/tools/serve.sh reboot
 #   bin/tools/serve.sh snapshot
 #   bin/tools/serve.sh set <KEY> [value]
+#   bin/tools/serve.sh unset <KEY>
 #   bin/tools/serve.sh tunnel dagster|mailpit
 #   bin/tools/serve.sh shell
 #
@@ -27,7 +28,8 @@
 #   INSTANCE_TYPE         default: the template's
 #   DATA_VOLUME_SIZE      default: the template's, in GiB
 #   SNAPSHOT_ID           start from a snapshot of an earlier data volume
-#   ANTHROPIC_API_KEY     configure the server-side operators
+#   ANTHROPIC_API_KEY     configure the server-side operators (it reaches AWS in
+#                         a parameter file, never on a command line)
 #   ASSUME_YES=1          skip the confirmation
 #
 # The stack is yours to run. See docs/technical/Self-Hosting-on-a-Server.md.
@@ -40,7 +42,7 @@ TARGET_FILE="$ROOT/.local/serve.json"
 COMPOSE="docker compose -f compose.yaml --env-file .env --profile all"
 
 usage() {
-  sed -n '5,14s/^#   bin\/tools\/serve.sh/  just serve/p' "$0" >&2
+  sed -n 's/^#   bin\/tools\/serve.sh/  just serve/p' "$0" >&2
   exit 2
 }
 
@@ -122,7 +124,7 @@ load_target() {
 # what it printed, and return its exit status. The wait is this function's own,
 # sized from the timeout: the AWS CLI's waiter gives up after 100 seconds.
 on_instance() {
-  local timeout=$1 script=$2 request command status waited=0
+  local timeout=$1 script=$2 request command status problem waited=0
   request=$(mktemp)
   jq -n --arg script "$script" --arg timeout "$timeout" \
     '{commands: [$script], executionTimeout: [$timeout]}' >"$request"
@@ -136,8 +138,20 @@ on_instance() {
   while :; do
     sleep 3
     waited=$((waited + 3))
+    problem=$(mktemp)
     status=$(aws ssm get-command-invocation --command-id "$command" \
-      --instance-id "$INSTANCE" --query Status --output text 2>/dev/null || echo Pending)
+      --instance-id "$INSTANCE" --query Status --output text 2>"$problem") || {
+      # The invocation takes a moment to exist; anything else is a real failure
+      # (an expired session, a lost permission) and waiting would not fix it.
+      if grep -q InvocationDoesNotExist "$problem"; then
+        status=Pending
+      else
+        cat "$problem" >&2
+        rm -f "$problem"
+        die "could not read the command's result (id $command)"
+      fi
+    }
+    rm -f "$problem"
     case "$status" in
     Pending | InProgress | Delayed) ;;
     *) break ;;
@@ -254,6 +268,21 @@ cmd_launch() {
     [ -n "$version" ] || die "found no release with a published image; set ROBOSYSTEMS_VERSION"
   fi
 
+  # deploy would update a stack of this name in place, and a changed release
+  # or setting changes the boot script, which restarts or replaces the instance.
+  local existing
+  existing=$(aws cloudformation describe-stacks --stack-name "$STACK" \
+    --query 'Stacks[0].StackStatus' --output text 2>/dev/null || true)
+  case "$existing" in
+  '') ;;
+  *FAILED | ROLLBACK_COMPLETE)
+    die "stack $STACK exists from a launch that failed ($existing); delete it first: aws cloudformation delete-stack --profile $profile --region $REGION --stack-name $STACK"
+    ;;
+  *)
+    die "stack $STACK already exists in account $ACCOUNT ($existing); launch does not update a running stack. To move it to another release: just serve upgrade. For a second stack, give launch another stack name"
+    ;;
+  esac
+
   local params=(
     "VpcId=$vpc" "PublicSubnetId=$subnet" "AllowedCidr=$cidr"
     "HostedZoneId=$zone" "DomainName=$domain" "RobosystemsVersion=$version"
@@ -279,15 +308,34 @@ the stack is deleted. You run it: upgrades, backups and the instance are yours.
 EOF
   confirm "Launch?"
 
+  # The parameters travel in a file, so a key among them is in no process list.
+  local parameter_file failed_instance
+  parameter_file=$(mktemp)
+  chmod 600 "$parameter_file"
+  printf '%s\n' "${params[@]}" | jq -R . | jq -s . >"$parameter_file"
+
+  echo "Launching; the stack completes when the API answers, usually within 15 minutes."
+  # A failed launch is kept, not rolled back, so its boot log can be read.
+  if ! aws cloudformation deploy --stack-name "$STACK" \
+    --template-file "$TEMPLATE" --capabilities CAPABILITY_IAM --disable-rollback \
+    --parameter-overrides "file://$parameter_file"; then
+    rm -f "$parameter_file"
+    failed_instance=$(aws cloudformation describe-stack-resource --stack-name "$STACK" \
+      --logical-resource-id ServeInstance \
+      --query StackResourceDetail.PhysicalResourceId --output text 2>/dev/null || true)
+    echo "serve: the stack did not complete and was left as it failed." >&2
+    [ -z "$failed_instance" ] || [ "$failed_instance" = "None" ] ||
+      echo "  The boot log is /var/log/robosystems-bootstrap.log on the instance: aws ssm start-session --profile $profile --region $REGION --target $failed_instance" >&2
+    echo "  Delete it before launching again: aws cloudformation delete-stack --profile $profile --region $REGION --stack-name $STACK" >&2
+    exit 1
+  fi
+  rm -f "$parameter_file"
+
+  # Remembered only now, so a launch that fails never replaces the pointer to
+  # a stack that works.
   mkdir -p "$(dirname "$TARGET_FILE")"
   jq -n --arg profile "$profile" --arg region "$REGION" --arg stack "$STACK" \
     '{profile: $profile, region: $region, stack: $stack}' >"$TARGET_FILE"
-
-  echo "Launching; the stack completes when the API answers, usually within 15 minutes."
-  aws cloudformation deploy --stack-name "$STACK" \
-    --template-file "$TEMPLATE" --capabilities CAPABILITY_IAM \
-    --parameter-overrides "${params[@]}" ||
-    die "the stack did not complete; read the boot log with: just serve shell, then /var/log/robosystems-bootstrap.log"
 
   aws cloudformation describe-stacks --stack-name "$STACK" \
     --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' --output text
@@ -299,7 +347,7 @@ cmd_status() {
   echo "stack $STACK in $ACCOUNT ($REGION), instance $INSTANCE: $(aws ec2 describe-instances \
     --instance-ids "$INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text)"
   on_instance 60 "cd /data/robosystems
-echo \"release: \$(grep -E '^ROBOSYSTEMS_IMAGE=' .env | cut -d: -f2), API reports \$(curl -sf --max-time 5 http://127.0.0.1:8000/v1/status | jq -r .details.version 2>/dev/null || echo 'no answer')\"
+echo \"release: \$(grep -E '^ROBOSYSTEMS_IMAGE=' .env | cut -d: -f2), API reports \$(curl -sf --max-time 5 http://127.0.0.1:8000/v1/status | jq -er .details.version 2>/dev/null || echo 'no answer')\"
 docker ps --all --format 'table {{.Names}}\t{{.Status}}'
 echo
 df -h /data | tail -1 | awk '{print \"data volume: \" \$3 \" used of \" \$2 \" (\" \$5 \")\"}'
@@ -325,6 +373,8 @@ cmd_logs() {
   case "$lines" in
   '' | *[!0-9]*) die "not a line count: $lines" ;;
   esac
+  # Systems Manager returns about 24,000 characters of output and drops the rest.
+  [ "$lines" -le 200 ] || die "at most 200 lines; for more, read it on the instance: just serve shell"
   load_target
   on_instance 60 "cd /data/robosystems && $COMPOSE logs --no-log-prefix --tail $lines $service 2>&1"
 }
@@ -354,18 +404,55 @@ cmd_snapshot() {
   echo "Start a new stack from it with: SNAPSHOT_ID=<id> just serve launch"
 }
 
+# A setting name the stack lets an operator change. The secrets the first boot
+# generated are refused: the databases on the data volume were created with
+# them, so a new value locks the stack out of its own data. The image pins
+# belong to upgrade.
+setting_name() {
+  case "$1" in
+  [A-Z]*) ;;
+  *) die "not a setting name: $1" ;;
+  esac
+  case "$1" in
+  *[!A-Z0-9_]*) die "not a setting name: $1" ;;
+  esac
+  case "$1" in
+  POSTGRES_PASSWORD | DAGSTER_POSTGRES_PASSWORD | VALKEY_AUTH_TOKEN | JWT_SECRET_KEY | ADMIN_API_KEY | CONNECTION_CREDENTIALS_KEY)
+    die "$1 was generated when the stack first booted and its data depends on it; it is not changed here"
+    ;;
+  *_IMAGE) die "$1 is the release pin; move it with: just serve upgrade" ;;
+  esac
+}
+
+# settings_secret: the stack's settings secret, by its id.
+settings_secret() {
+  aws cloudformation describe-stack-resource --stack-name "$STACK" \
+    --logical-resource-id ServeSettingsSecret \
+    --query StackResourceDetail.PhysicalResourceId --output text 2>/dev/null ||
+    die "stack $STACK has no settings secret"
+}
+
+# write_settings <secret> <jq-filter> [jq-args...]: the secret's JSON, changed.
+write_settings() {
+  local secret=$1 filter=$2 current next
+  shift 2
+  current=$(aws secretsmanager get-secret-value --secret-id "$secret" \
+    --query SecretString --output text)
+  next=$(mktemp)
+  chmod 600 "$next"
+  jq "$@" "$filter" <<<"$current" >"$next"
+  aws secretsmanager put-secret-value --secret-id "$secret" \
+    --secret-string "file://$next" >/dev/null
+  rm -f "$next"
+}
+
 # The value goes to the stack's settings secret and the instance reads it from
 # there, so it is never in a command's text or in Systems Manager's history.
+# Given as an argument it is in this machine's shell history; the prompt is not.
 cmd_set() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: just serve set <KEY> [value]"
-  local key=$1 value secret current next
-  case "$key" in
-  [A-Z]*) ;;
-  *) die "not a setting name: $key" ;;
-  esac
-  case "$key" in
-  *[!A-Z0-9_]*) die "not a setting name: $key" ;;
-  esac
+  local key=$1 value secret
+  setting_name "$key"
   load_target
   if [ $# -eq 2 ]; then
     value=$2
@@ -374,20 +461,26 @@ cmd_set() {
     read -r -s -p "Value for $key (hidden): " value
     echo >&2
   fi
-  secret=$(aws cloudformation describe-stack-resource --stack-name "$STACK" \
-    --logical-resource-id ServeSettingsSecret \
-    --query StackResourceDetail.PhysicalResourceId --output text 2>/dev/null) ||
-    die "stack $STACK has no settings secret"
-  current=$(aws secretsmanager get-secret-value --secret-id "$secret" \
-    --query SecretString --output text)
-  next=$(mktemp)
-  chmod 600 "$next"
-  jq --arg key "$key" --arg value "$value" '.[$key] = $value' <<<"$current" >"$next"
-  aws secretsmanager put-secret-value --secret-id "$secret" \
-    --secret-string "file://$next" >/dev/null
-  rm -f "$next"
+  case "$value" in
+  *$'\n'* | *$'\r'*) die "a value is one line" ;;
+  esac
+  secret=$(settings_secret)
+  write_settings "$secret" '.[$key] = $value' --arg key "$key" --arg value "$value"
   echo "Saved $key; applying it on the instance."
   on_instance 600 "robosystems-apply-settings 2>&1"
+}
+
+# Drops a setting from the secret and comments its line out of .env, which
+# returns the stack to the release's own default for it.
+cmd_unset() {
+  [ $# -eq 1 ] || die "usage: just serve unset <KEY>"
+  local key=$1 secret
+  setting_name "$key"
+  load_target
+  secret=$(settings_secret)
+  write_settings "$secret" 'del(.[$key])' --arg key "$key"
+  echo "Removed $key; applying on the instance."
+  on_instance 600 "sed -i -E 's/^($key=)/# \\1/' /data/robosystems/.env && robosystems-apply-settings 2>&1"
 }
 
 cmd_tunnel() {
@@ -414,6 +507,6 @@ command -v aws >/dev/null 2>&1 || die "the AWS CLI is required"
 VERB=$1
 shift
 case "$VERB" in
-launch | status | upgrade | logs | restart | reboot | snapshot | set | tunnel | shell) "cmd_$VERB" "$@" ;;
+launch | status | upgrade | logs | restart | reboot | snapshot | set | unset | tunnel | shell) "cmd_$VERB" "$@" ;;
 *) usage ;;
 esac

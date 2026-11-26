@@ -134,7 +134,7 @@ just serve launch
 
 It asks three things: which AWS CLI profile (the account to launch into), the base name, and the address range allowed to reach the stack, where `me` is the machine you run it from. The base name has to sit in a public Route 53 hosted zone of that account, which the command finds from the name. Then it shows the account and what it will create, and asks before launching. The same three can be given as arguments instead, `just serve launch my-account serve.example.com me`. The account is always named or chosen and never read from the shell's own credentials, so a terminal signed in to another account cannot receive the stack. The stack is complete when the API answers, usually within fifteen minutes, and its outputs are the addresses.
 
-**What the stack creates.** One ARM instance with 32 GB of memory on Amazon Linux 2023, reached through Session Manager, with no SSH. A separate encrypted data volume, mounted at `/data`, that holds the checkout and its `.env`, the graph files, Docker's volumes and the certificates. An Elastic IP and five DNS records under your base name: `api`, `app`, `ledger`, `investor` and `s3`. Caddy on the instance gets a public certificate for each name by itself. The JWT secret, the admin key and the PostgreSQL and Valkey passwords are generated on the instance at first boot. The platform runs the newest release whose image is published, and the three apps their latest images; `ROBOSYSTEMS_VERSION` picks another release at launch, and the other launch settings are listed at the top of `bin/tools/serve.sh`.
+**What the stack creates.** One ARM instance with 32 GB of memory on Amazon Linux 2023, reached through Session Manager, with no SSH. A separate encrypted data volume, mounted at `/data`, that holds the checkout and its `.env`, the graph files, Docker's volumes and the certificates. An Elastic IP and five DNS records under your base name: `api`, `app`, `ledger`, `investor` and `s3`. Caddy on the instance gets a public certificate for each name by itself. The JWT secret, the admin key and the PostgreSQL and Valkey passwords are generated on the instance at first boot. Docker Compose and Caddy are installed at pinned versions. The platform runs the newest release whose image is published, and the three apps their latest images; `ROBOSYSTEMS_VERSION` picks another release at launch, and the other launch settings are listed at the top of `bin/tools/serve.sh`.
 
 **Reaching it.** Port 443 is open to the range you gave and to nothing else. That is what this shape is: one operator's own deployment, reached from their own network. The object store's credentials are the same on every installation ([Limits Today](#limits-today)) and registration starts open, so it is not built to face the internet; a deployment a team or a client reaches from anywhere is what the hosted platform is for. Port 80 is open to the world for the certificate challenge and the redirect to HTTPS. Everything under [Users and API Keys](#users-and-api-keys) and [Clients on Laptops](#clients-on-laptops) applies as written, with public certificates, so no laptop needs a root installed.
 
@@ -144,15 +144,18 @@ It asks three things: which AWS CLI profile (the account to launch into), the ba
 | --- | --- |
 | `just serve status` | The release running, each container's state, disk and memory |
 | `just serve upgrade v1.25.0` | Moves the platform to a release (`latest` is the default) and waits for the API to report it; it is `just upgrade-to` on the instance |
-| `just serve logs api` | The last lines of one service's log; a second argument is how many |
+| `just serve logs api` | The last lines of one service's log; a second argument is how many, up to 200 |
 | `just serve restart worker` | Restarts one service, or every service with no argument |
 | `just serve reboot` | Reboots the instance; the containers start by themselves |
 | `just serve snapshot` | Snapshots the data volume now, before an upgrade for instance |
 | `just serve set KEY` | Changes a setting in `.env` and recreates the containers that read it |
+| `just serve unset KEY` | Removes a setting made that way, back to the release's default |
 | `just serve tunnel dagster` | Forwards the Dagster UI to `http://127.0.0.1:18002`; `mailpit` forwards the inbox to `18025` |
 | `just serve shell` | A shell on the instance |
 
-`set` asks for the value without showing it, or takes it as a second argument. Either way the value goes to a Secrets Manager secret in your account and the instance reads it from there, so a key is never in a command's text or in Systems Manager's history. Change releases with `upgrade` and not through the stack's parameters, which apply at first launch only.
+`set` asks for the value without showing it, or takes it as a second argument, which leaves it in your shell's history. Either way the value goes to a Secrets Manager secret in your account and the instance reads it from there, so a key is never in a command's text or in Systems Manager's history. What that secret holds is written into `.env` again on every `set`, `unset` and boot, so a line edited by hand on the instance lasts only until then if the secret names it; change such a setting with `set`. The secrets generated at first boot (the database and cache passwords, the JWT secret, the admin key) are refused, because the data on the volume was created with them.
+
+`launch` creates a stack and never updates one: run against a stack that exists, it stops. Move a running stack to another release with `upgrade`.
 
 The data volume is also snapshotted daily, seven kept. A snapshot is taken while the stack runs, so it is what a power cut would leave and the databases recover from it on start. Deleting the stack leaves a final snapshot, and `SNAPSHOT_ID=snap-... just serve launch` starts a new stack from one. The instance, the volume and the address bill until the stack is deleted.
 

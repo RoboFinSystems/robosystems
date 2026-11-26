@@ -121,7 +121,7 @@ Resources:
   ServeSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     DeletionPolicy: Delete
-    UpdateReplacePolicy: Retain
+    UpdateReplacePolicy: Delete
     Properties:
       GroupDescription: RoboSystems Serve - HTTPS from the allowed range, HTTP for the certificate challenge
       VpcId: !Ref VpcId
@@ -234,7 +234,9 @@ Resources:
       SubnetId: !Ref PublicSubnetId
       SecurityGroupIds:
         - !Ref ServeSecurityGroup
-      # One hop: the host reads its role, the containers cannot
+      # One hop: the host reads its role and the stack's containers, on the
+      # compose network, cannot. Caddy shares the host's network and can; the
+      # role grants only the read of this stack's settings secret
       MetadataOptions:
         HttpEndpoint: enabled
         HttpTokens: required
@@ -316,8 +318,12 @@ Resources:
             mkdir -p /etc/docker /data/docker /etc/systemd/system/docker.service.d /usr/local/lib/docker/cli-plugins
             echo '{"data-root": "/data/docker", "log-driver": "json-file", "log-opts": {"max-size": "50m", "max-file": "5"}}' >/etc/docker/daemon.json
             printf '[Unit]\nRequiresMountsFor=/data\n' >/etc/systemd/system/docker.service.d/data.conf
+            # Pinned, and checked against the checksum the release publishes.
+            COMPOSE_VERSION=v5.8.0
+            COMPOSE_SHA256=1a9c918b2fb49b9c87f0018c64b5abd0d30715155e98dc939779fbaee6c414d3
             curl -fsSL -o /usr/local/lib/docker/cli-plugins/docker-compose \
-              https://github.com/docker/compose/releases/latest/download/docker-compose-linux-aarch64
+              "https://github.com/docker/compose/releases/download/$COMPOSE_VERSION/docker-compose-linux-aarch64"
+            echo "$COMPOSE_SHA256  /usr/local/lib/docker/cli-plugins/docker-compose" | sha256sum --check --quiet
             chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
             systemctl daemon-reload
             systemctl enable --now docker
@@ -437,7 +443,7 @@ Resources:
             docker run --detach --name caddy --restart always --network host \
               -v /data/caddy/Caddyfile:/etc/caddy/Caddyfile:ro \
               -v /data/caddy/data:/data -v /data/caddy/config:/config \
-              caddy:2
+              caddy:2.11.9
 
             cat >/usr/local/bin/robosystems-upgrade <<'EOF'
             #!/bin/bash
