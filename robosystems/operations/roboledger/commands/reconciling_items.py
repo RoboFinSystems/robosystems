@@ -1240,7 +1240,14 @@ def resolve_reconciling_item(
         record["settled_payload"] = accepted
     else:
       record["catch_up_event_id"] = None
+    removed = bool(accepted.get("source_removed"))
+    if removed:
+      # The reversal takes a retracted transaction out of the books, so a read
+      # keyed on the event's status (open AR/AP) stops counting it.
+      record["status_before"] = str(event.status)
     event.metadata_ = _accepted_metadata(live=live, accepted=accepted, record=record)
+    if removed:
+      event.status = "voided"
 
   else:  # acknowledge
     if body.reference_event_id is not None:
@@ -1341,6 +1348,11 @@ def reopen_items_settled_by(
         for k, v in live.items()
         if k not in ("drift_payload", "drift_detected_at", RECONCILIATION_HISTORY_KEY)
       }
+
+    prior_status = record.get("status_before")
+    if prior_status and str(item.status) == "voided":
+      # The reversal is gone, so the retracted transaction is back in the books.
+      item.status = prior_status
 
     history.append(
       {

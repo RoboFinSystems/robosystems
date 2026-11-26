@@ -132,6 +132,35 @@ def test_a_deleted_posted_transaction_reverses_through_catch_up_only(session):
   reversal = _line_nets(session, result.catch_up.event_id)
   assert original and all(original[k] + reversal.get(k, 0) == 0 for k in original)
   assert sum(abs(v) for v in original.values()) == 2 * AMOUNT
+  # Reversed, the transaction is out of the books: an open AR/AP read keys on
+  # the event's status, so a voided invoice or payment stops counting.
+  session.refresh(posted)
+  assert posted.status == "voided"
+  assert posted.payload_drift is False
+
+
+def test_voiding_the_reversal_puts_the_transaction_back_in_the_books(session):
+  from tests.operations.roboledger.commands.test_reconciling_items_db import _void
+
+  posted, _unposted, _published = _seed(session)
+  apply_deletions(
+    session, [{"entity": "Purchase", "id": "1737", "last_updated": None}], now=NOW
+  )
+  session.flush()
+  result = resolve_reconciling_item(
+    session,
+    ResolveReconcilingItemRequest(event_id=str(posted.id), disposition="catch_up"),
+    "user_test",
+    graph_id=GRAPH_ID,
+  )
+  session.commit()
+  assert result.catch_up is not None
+
+  _void(session, result.catch_up.event_id)
+
+  session.refresh(posted)
+  assert posted.status == "fulfilled"
+  assert posted.payload_drift is True
 
 
 def test_nothing_to_delete_touches_nothing(session):
