@@ -2,7 +2,7 @@
 # RoboSystems Serve: the whole platform on one EC2 instance in your own AWS
 # account, launched from cloudformation/serve.yaml and run from here.
 #
-#   bin/tools/serve.sh launch [<profile> <domain> <allowed-cidr|me> [stack-name]]
+#   bin/tools/serve.sh launch [<profile> <domain> <allowed-address|me> [stack-name]]
 #   bin/tools/serve.sh status
 #   bin/tools/serve.sh upgrade [<tag>|latest]
 #   bin/tools/serve.sh logs <service> [lines]
@@ -234,12 +234,18 @@ cmd_launch() {
       die "no public hosted zone in account $ACCOUNT holds $domain; create one or set HOSTED_ZONE_ID"
   fi
 
-  [ -n "$cidr" ] || cidr=$(ask "Address range allowed to reach it on 443 (\"me\" = this machine)" "me")
+  [ -n "$cidr" ] || cidr=$(ask "The one address allowed to reach it on 443 (\"me\" = this machine)" "me")
   if [ "$cidr" = "me" ]; then
     address=$(curl -sf --max-time 10 https://checkip.amazonaws.com) ||
-      die "could not read this machine's public address; pass a CIDR"
+      die "could not read this machine's public address; pass an address"
     cidr="${address}/32"
   fi
+  # One address, never a range: the stack is not built to face a network.
+  case $cidr in
+  */32) ;;
+  */*) die "443 opens to one address: pass it as <address>/32, not a range ($cidr)" ;;
+  *) cidr="${cidr}/32" ;;
+  esac
 
   vpc=${VPC_ID:-}
   if [ -z "$vpc" ]; then
