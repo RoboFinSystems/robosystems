@@ -130,7 +130,13 @@ Then set `SSL_CERT_FILE=/path/to/ca-bundle.pem` in `.env.local`, which the `just
 
 ## The Model Lane
 
-The operators, the server-side AI, call Claude through AWS Bedrock by default and can be pointed at any server that implements the OpenAI Chat Completions API with tool calling, on the same machine or on another one on your network. [Self-Hosted AI Models](Self-Hosted-AI-Models.md) has the settings, which models have been tested, and what to check before pointing one at real books.
+The operators, the server-side AI, need a model, and a stack you run reaches one in any of three ways:
+
+- **The Anthropic API, on your own key.** `ANTHROPIC_API_KEY` with `ANTHROPIC_API_ENABLED=true` in `.env`. This is the shortest route to the Claude models and the one [the AWS template](#on-aws-from-one-template) is built around.
+- **A model you host.** Any server that implements the OpenAI Chat Completions API with tool calling, on the same machine or on another one on your network. [Self-Hosted AI Models](Self-Hosted-AI-Models.md) has the settings, which models have been tested, and what to check before pointing one at real books.
+- **AWS Bedrock.** Where neither of the above is set the operators call Claude through Bedrock, with the `AWS_BEDROCK_*` credentials in `.env`. It is what the hosted platform uses, and it needs an AWS account with access to the Claude models.
+
+With none of the three configured the operators do not run and everything else does: ingestion, reporting, the close, search and the MCP tools use no model on the server.
 
 ## On AWS, From One Template
 
@@ -174,7 +180,16 @@ A stack launched before `selfhost` existed runs `ENVIRONMENT=dev`. Upgrade it to
 
 The data volume is also snapshotted daily, seven kept. A snapshot is taken while the stack runs, so it is what a power cut would leave and the databases recover from it on start. Deleting the stack leaves a final snapshot, and `SNAPSHOT_ID=snap-... just serve launch` starts a new stack from one. The instance, the volume and the address bill until the stack is deleted.
 
-**The operators.** Set `ANTHROPIC_API_KEY` in your environment when you launch, or run `just serve set ANTHROPIC_API_KEY` and `just serve set ANTHROPIC_API_ENABLED true` afterwards, and the server-side operators run on the Anthropic API. Without a key the operators stay unconfigured and everything else works.
+**The operators.** The server-side operators run on the Anthropic API, on a key you provide. Set `ANTHROPIC_API_KEY` in your environment when you launch and the stack is configured for it. On a stack that is already running, two commands do the same, in this order:
+
+```bash
+just serve set ANTHROPIC_API_KEY            # asks for the key without showing it
+just serve set ANTHROPIC_API_ENABLED true
+```
+
+Each one recreates the containers that read the setting, so there is nothing to restart or reboot afterwards. The key goes first because the API does not start with the Anthropic API turned on and no key to use. Without a key the operators stay unconfigured and everything else works.
+
+The stack is not set up for Bedrock, on purpose: the instance's role can open a Session Manager session and read its own settings secret, and nothing else in your account. To run the operators on a model you host instead, set the `OPENAI_COMPAT_*` settings from [Self-Hosted AI Models](Self-Hosted-AI-Models.md) the same way.
 
 ## Limits Today
 
