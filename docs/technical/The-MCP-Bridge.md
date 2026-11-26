@@ -39,6 +39,8 @@ This is the shape of `claude_desktop_config.json` and of other clients that take
 claude mcp add robosystems-bridge -e ROBOSYSTEMS_API_KEY=<your key> -- npx -y @robosystems/mcp@latest
 ```
 
+That adds the bridge to the current project only; add `--scope user` to have it in every project. The command suits the simple case of a key alone. Anything more ([choosing graphs](#choosing-graphs), aliases, [read-only](#read-only)) is another `-e` flag each, and is easier to read and change in the configuration file.
+
 Keep `@latest` in the arguments: a global `npm install -g @robosystems/mcp` can shadow `npx` and pin an old version. Creating and scoping keys is covered in [Authentication & API Keys](Authentication-and-API-Keys.md#api-key-lifecycle).
 
 ---
