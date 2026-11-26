@@ -160,12 +160,12 @@ This is for a client that can only run local servers and needs one graph's tools
 - **[Authentication & API Keys](Authentication-and-API-Keys.md)** - Keys, scopes and revocation
 - **[Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md)** - Graphs, subgraphs and what a key reaches
 - **[Custom Graph Schema](Custom-Graph-Schema.md)** - Node and relationship tables on a subgraph
-- **[Source and releases](https://github.com/RoboFinSystems/robosystems-mcp-client)** - The package's repository
+- **[Source and releases](https://github.com/RoboFinSystems/robosystems-mcp-bridge)** - The package's repository
 
 ---
 
 ## Support
 
-- [Issues](https://github.com/RoboFinSystems/robosystems-mcp-client/issues)
+- [Issues](https://github.com/RoboFinSystems/robosystems-mcp-bridge/issues)
 - [Technical docs](Home.md)
 - [Discussions](https://github.com/orgs/RoboFinSystems/discussions)

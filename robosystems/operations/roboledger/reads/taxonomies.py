@@ -485,13 +485,23 @@ def _gross_sibling_targets(
   # Read across every mapping, a sibling can map to two concepts; then there
   # is nothing to offer.
   concepts_of: dict[str, set[str]] = {}
-  for sibling_id, concept_id in session.execute(
-    select(Association.from_element_id, Association.to_element_id).where(
+  # A sibling arc nobody has approved carries its confidence to the contra: a
+  # guess about the gross account is no firmer for the account that nets it.
+  unreviewed: dict[str, float] = {}
+  for sibling_id, concept_id, confidence, approved_by in session.execute(
+    select(
+      Association.from_element_id,
+      Association.to_element_id,
+      Association.confidence,
+      Association.approved_by,
+    ).where(
       *mapping_arcs,
       Association.from_element_id.in_(set(sibling_of.values())),
     )
   ).all():
     concepts_of.setdefault(sibling_id, set()).add(concept_id)
+    if confidence is not None and approved_by is None:
+      unreviewed[sibling_id] = float(confidence)
   targets = {
     sibling_id: next(iter(ids))
     for sibling_id, ids in concepts_of.items()
@@ -505,7 +515,10 @@ def _gross_sibling_targets(
   }
   return {
     contra_id: SuggestedTarget(
-      element_id=concept.id, qname=concept.qname or "", name=concept.name
+      element_id=concept.id,
+      qname=concept.qname or "",
+      name=concept.name,
+      confidence=unreviewed.get(sibling_id),
     )
     for contra_id, sibling_id in sibling_of.items()
     if (concept := concepts.get(targets.get(sibling_id, "")))

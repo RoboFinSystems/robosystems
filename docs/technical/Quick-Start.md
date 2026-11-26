@@ -57,7 +57,7 @@ The key is a string beginning with `rfs`, and it is **shown once**. Copy it into
 export ROBOSYSTEMS_API_KEY=rfs...
 ```
 
-Every example in these docs reads the key from `$ROBOSYSTEMS_API_KEY`, the same variable the [RoboSystems MCP client](https://github.com/RoboFinSystems/robosystems-mcp-client) uses. Revoke a key at any time from the same page.
+Every example in these docs reads the key from `$ROBOSYSTEMS_API_KEY`, the same variable the [RoboSystems MCP bridge](The-MCP-Bridge.md) uses. Revoke a key at any time from the same page.
 
 Confirm the key works by fetching your user:
 

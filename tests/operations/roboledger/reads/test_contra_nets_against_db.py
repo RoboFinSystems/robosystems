@@ -103,7 +103,14 @@ def _account(g, code: str, name: str, trait: str | None, parent=None) -> Element
   return account
 
 
-def _map(g, account: Element, qname: str) -> None:
+def _map(
+  g,
+  account: Element,
+  qname: str,
+  *,
+  confidence: float | None = None,
+  approved_by: str | None = None,
+) -> None:
   session = g["session"]
   concept = session.execute(
     select(Element.id).where(Element.qname == qname)
@@ -115,6 +122,8 @@ def _map(g, account: Element, qname: str) -> None:
       to_element_id=concept,
       association_type="mapping",
       created_by="usr_1",
+      confidence=confidence,
+      approved_by=approved_by,
     )
   )
   session.flush()
@@ -136,6 +145,23 @@ def test_the_contra_is_offered_its_mapped_gross_siblings_concept(chart) -> None:
   _map(chart, gross, NET)
   offer = _offer(chart, contra)
   assert offer is not None and offer.qname == NET
+
+
+@pytest.mark.parametrize(
+  ("confidence", "approved_by", "carried"),
+  [(0.7, None, 0.7), (0.7, "usr_1", None), (None, None, None)],
+  ids=["a-guess", "a-guess-a-person-approved", "mapped-by-hand"],
+)
+def test_the_offer_carries_an_unreviewed_siblings_confidence(
+  chart, confidence, approved_by, carried
+) -> None:
+  parent = _account(chart, "1400", "Intangible Assets", "asset")
+  gross = _account(chart, "1410", "Gross Intangible Assets", "asset", parent)
+  contra = _account(chart, "1420", "Accumulated Amortization", "contraAsset", parent)
+  _map(chart, gross, NET, confidence=confidence, approved_by=approved_by)
+
+  offer = _offer(chart, contra)
+  assert offer is not None and offer.confidence == carried
 
 
 def test_two_gross_siblings_leave_the_contra_to_a_person(chart) -> None:
