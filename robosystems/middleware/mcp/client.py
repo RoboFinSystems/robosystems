@@ -701,7 +701,7 @@ class GraphMCPClient:
     from robosystems.config import env
 
     # Production hides query errors to avoid leaking schema.
-    if env.ENVIRONMENT in ("dev", "staging"):
+    if env.is_development() or env.is_staging():
       for pattern in _QUERY_ERROR_PATTERNS:
         if re.search(pattern, error_str, re.IGNORECASE):
           sanitized = re.sub(r"/[\w/]+\.(py|cpp|h)", "[internal]", error_str)

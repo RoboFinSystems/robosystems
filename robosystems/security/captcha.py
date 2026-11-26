@@ -43,8 +43,8 @@ class CaptchaService:
       )
 
     if not self.secret_key:
-      # Fail closed in deployed environments; dev/test fall open.
-      if env.is_production() or env.is_staging():
+      # Fail closed when deployed (prod, staging, selfhost); dev/test fall open.
+      if env.is_deployed():
         logger.error(
           "TURNSTILE_SECRET_KEY not configured while CAPTCHA is enabled - "
           "failing closed"

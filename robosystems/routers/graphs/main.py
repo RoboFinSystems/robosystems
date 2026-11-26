@@ -683,7 +683,7 @@ async def get_graph_capacity(
       "at_capacity": "Currently at capacity — contact us for access",
     }
 
-    manager = LadybugAllocationManager(environment=app_env.ENVIRONMENT)
+    manager = LadybugAllocationManager(environment=app_env.STACK_ENVIRONMENT)
 
     tiers: list[TierCapacity] = []
     for tier_name, tier_enum in tier_map.items():

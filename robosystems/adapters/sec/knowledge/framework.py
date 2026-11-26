@@ -38,7 +38,7 @@ class DuckDBAnalyticsContext:
     self._db_path: Path | None = None
 
   def __enter__(self) -> DuckDBAnalyticsContext:
-    if env.is_development():
+    if env.is_single_node():
       db_path = Path(get_staging_duckdb_path(self._duckdb_source))
       if not db_path.exists():
         raise FileNotFoundError(
@@ -139,7 +139,7 @@ class DuckDBAnalyticsContext:
       logger.warning("No parquet files found in %s", self._output_dir)
       return results
 
-    if env.is_development():
+    if env.is_single_node():
       for pf in parquet_files:
         rel_path = pf.relative_to(self._output_dir)
         table_name = pf.stem

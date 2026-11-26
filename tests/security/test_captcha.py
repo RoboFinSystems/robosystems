@@ -110,8 +110,7 @@ class TestCaptchaService:
   async def test_verify_turnstile_token_missing_secret_dev_fails_open(self, mock_env):
     """Dev/test with no secret falls open (convenience)."""
     mock_env.TURNSTILE_SECRET_KEY = None
-    mock_env.is_production.return_value = False
-    mock_env.is_staging.return_value = False
+    mock_env.is_deployed.return_value = False
 
     service = CaptchaService()
     result = await service.verify_turnstile_token("valid_token")
@@ -126,8 +125,7 @@ class TestCaptchaService:
   ):
     """Prod/staging with an enabled gate but no secret fails closed (rejects)."""
     mock_env.TURNSTILE_SECRET_KEY = None
-    mock_env.is_production.return_value = True
-    mock_env.is_staging.return_value = False
+    mock_env.is_deployed.return_value = True
 
     service = CaptchaService()
     result = await service.verify_turnstile_token("valid_token")

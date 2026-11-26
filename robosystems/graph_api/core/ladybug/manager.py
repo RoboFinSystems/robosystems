@@ -232,7 +232,7 @@ class LadybugDatabaseManager:
         f"Database {request.graph_id} created successfully in {execution_time:.2f}ms"
       )
 
-      if env.is_development():
+      if env.is_single_node():
         self._update_instance_registry()
       elif request.schema_type == "shared" and request.repository_name:
         self._register_shared_repository(request.graph_id)

@@ -26,7 +26,7 @@ from robosystems.logger import logger
 # Matches daily_backup_cleanup_schedule, whose retention this balances.
 _SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.ENVIRONMENT != "dev"
+  if env.STACK_ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

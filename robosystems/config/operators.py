@@ -184,23 +184,24 @@ def self_hosted_model_spec(model_id: str, max_output_tokens: int) -> ModelSpec:
   )
 
 
-# Where the Anthropic API may serve the Claude rows: a developer's own stack.
-_ANTHROPIC_API_ENVIRONMENTS = frozenset({"dev", "test"})
+# Where the Anthropic API may serve the Claude rows: a stack running on its
+# operator's own key (development, or a self-hosted one).
+_ANTHROPIC_API_ENVIRONMENTS = frozenset({"dev", "test", "selfhost"})
 
 
 def anthropic_api_models(
   enabled: bool, api_key: str, environment: str
 ) -> dict[OperatorModel, ModelSpec]:
   """The Claude rows served by the Anthropic API instead of Bedrock, for a
-  developer running on their own API key. A row's short name is already its
-  Anthropic model id, and its request fields and rate-card key carry over, so
-  only the wire id and the provider change. Refused outside local
-  development: hosted deployments keep inference inside AWS."""
+  stack running on its operator's own API key. A row's short name is already
+  its Anthropic model id, and its request fields and rate-card key carry over,
+  so only the wire id and the provider change. Refused on prod and staging:
+  our hosted deployments keep inference inside AWS."""
   if not enabled:
     return dict(_BEDROCK_MODELS)
   if environment not in _ANTHROPIC_API_ENVIRONMENTS:
     raise ValueError(
-      "ANTHROPIC_API_ENABLED is for local development only; "
+      "ANTHROPIC_API_ENABLED is for development and self-hosted stacks; "
       f"ENVIRONMENT={environment!r} runs the Claude models on Bedrock"
     )
   if not api_key:

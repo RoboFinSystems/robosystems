@@ -43,6 +43,7 @@ def monitor(mock_event_storage, mock_dagster_client):
     mock_env.DAGSTER_HOST = "localhost"
     mock_env.DAGSTER_PORT = 3000
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
     m = DagsterRunMonitor(
       dagster_host="localhost",
       dagster_port=3000,
@@ -693,6 +694,7 @@ class TestBuildGraphJobConfig:
   def test_known_job_creates_config(self):
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       config = build_graph_job_config(
         "create_graph_job",
         graph_id="kg123",
@@ -709,6 +711,7 @@ class TestBuildGraphJobConfig:
   def test_stage_file_job_config(self):
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       config = build_graph_job_config(
         "stage_file_job",
         graph_id="kg456",
@@ -728,6 +731,7 @@ class TestBuildGraphJobConfig:
   def test_dev_environment_uses_in_process_executor(self):
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       config = build_graph_job_config("backup_graph_job", graph_id="kg789")
 
     assert "execution" in config
@@ -737,6 +741,7 @@ class TestBuildGraphJobConfig:
   def test_prod_environment_no_in_process_executor(self):
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       config = build_graph_job_config("backup_graph_job", graph_id="kg789")
 
     assert "execution" not in config
@@ -755,6 +760,7 @@ class TestBuildGraphJobConfig:
     ]
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       for job_name in known_jobs:
         config = build_graph_job_config(job_name, test_param="val")
         assert "ops" in config, f"Config missing 'ops' for {job_name}"
@@ -763,6 +769,7 @@ class TestBuildGraphJobConfig:
   def test_multi_op_job_all_ops_get_same_config(self):
     with patch("robosystems.middleware.sse.dagster_monitor.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       config = build_graph_job_config(
         "create_subgraph_job",
         graph_id="kg_parent",

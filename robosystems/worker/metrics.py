@@ -111,7 +111,7 @@ class QueueDepthPublisher:
     dlq_depth = self._queue.llen(DLQ_KEY)
     backlog = depth + in_flight
 
-    if env.ENVIRONMENT == "dev":
+    if env.STACK_ENVIRONMENT == "dev":
       logger.debug(
         f"Queue depth: {depth}, in flight: {in_flight}, DLQ depth: {dlq_depth} "
         "(CloudWatch publish skipped in dev)"

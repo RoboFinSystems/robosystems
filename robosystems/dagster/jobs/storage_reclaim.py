@@ -36,7 +36,7 @@ _RECLAIM_ENABLED_FLAG = "STORAGE_RECLAIM_ENABLED"
 # Schedule status: RUNNING in prod/staging, STOPPED in dev
 _SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.ENVIRONMENT != "dev"
+  if env.STACK_ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

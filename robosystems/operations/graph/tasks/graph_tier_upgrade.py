@@ -97,7 +97,7 @@ class GraphTierUpgradeTask(BaseTask):
     volume_manager_arn = get_volume_manager_function_arn()
 
     # Without the volume manager nothing can snapshot, detach, or reattach.
-    if not volume_manager_arn and not env.is_development():
+    if not volume_manager_arn and not env.is_single_node():
       raise ValueError(
         "Volume Manager Lambda ARN not found. Cannot perform tier upgrade "
         "without volume management infrastructure."
@@ -379,7 +379,7 @@ class GraphTierUpgradeTask(BaseTask):
 
   async def _ensure_asg_capacity(self, asg_client: Any, tier: str) -> None:
     """Ensure the target tier ASG has capacity for a new instance."""
-    environment = env.ENVIRONMENT
+    environment = env.STACK_ENVIRONMENT
     asg_name = f"robosystems-{tier}-writers-{environment}-asg"
 
     try:

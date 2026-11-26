@@ -48,7 +48,7 @@ def _get_writer_instances(
   Shared masters are excluded by default: rebuilding from DuckDB staging is
   faster than export/import.
   """
-  if env.is_development():
+  if env.is_single_node():
     # The client builds http://{private_ip}:8001 from inside the worker
     # container, where "localhost" is the worker; use GRAPH_API_URL's host.
     from urllib.parse import urlparse
@@ -65,7 +65,7 @@ def _get_writer_instances(
 
   from robosystems.middleware.graph.allocation_manager import LadybugAllocationManager
 
-  manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+  manager = LadybugAllocationManager(environment=env.STACK_ENVIRONMENT)
 
   # All instances, not just healthy: every instance holding data must migrate.
   all_items = []

@@ -74,7 +74,9 @@ def sec_duckdb_staged(
     repo_result = await ensure_shared_repository_exists(
       repository_name=config.graph_id,
       created_by="system",
-      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+      instance_id="local-dev"
+      if env.STACK_ENVIRONMENT == "dev"
+      else "ladybug-shared-prod",
     )
     context.log.info(f"SEC repository status: {repo_result.get('status', 'unknown')}")
 
@@ -195,7 +197,9 @@ def sec_historical_duckdb_staged(
       subgraph_name="historical",
       description="SEC Historical Filings (2009-2023)",
       created_by="system",
-      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+      instance_id="local-dev"
+      if env.STACK_ENVIRONMENT == "dev"
+      else "ladybug-shared-prod",
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 

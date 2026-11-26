@@ -85,7 +85,7 @@ class GraphTierConfig:
     if environment is None:
       if env.ENVIRONMENT == "prod":
         environment = "production"
-      elif env.ENVIRONMENT == "dev":
+      elif env.STACK_ENVIRONMENT == "dev":
         environment = "development"
       else:
         environment = "staging"
@@ -368,7 +368,7 @@ class GraphTierConfig:
     if environment is None:
       if env.ENVIRONMENT == "prod":
         environment = "production"
-      elif env.ENVIRONMENT == "dev":
+      elif env.STACK_ENVIRONMENT == "dev":
         environment = "development"
       else:
         environment = "staging"

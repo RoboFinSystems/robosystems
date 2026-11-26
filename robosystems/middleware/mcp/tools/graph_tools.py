@@ -392,7 +392,7 @@ class DeleteSubgraphTool:
         GraphDeprovisionService,
       )
 
-      await GraphDeprovisionService(env.ENVIRONMENT).release_subgraph_records(
+      await GraphDeprovisionService(env.STACK_ENVIRONMENT).release_subgraph_records(
         subgraph_id, session
       )
       session.delete(subgraph)

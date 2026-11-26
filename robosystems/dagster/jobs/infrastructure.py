@@ -19,7 +19,7 @@ from robosystems.models.core import OAuthClient, OAuthToken, UserAPIKey
 # Instance schedules need real AWS resources, so they are stopped in dev.
 INSTANCE_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.ENVIRONMENT != "dev"
+  if env.STACK_ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

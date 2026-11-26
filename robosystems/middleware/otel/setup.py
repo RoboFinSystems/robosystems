@@ -132,7 +132,7 @@ def setup_telemetry(app: FastAPI) -> None:
         logger.info(f"OTLP metrics exporter configured for endpoint: {otlp_endpoint}")
       except Exception as e:
         logger.error(f"Failed to configure OTLP metrics exporter: {e}")
-    elif otlp_endpoint == "http://localhost:4318" and env.is_development():
+    elif otlp_endpoint == "http://localhost:4318" and env.is_single_node():
       logger.info(
         "Skipping OTLP metrics exporter for localhost endpoint in dev environment (use observability profile)"
       )
@@ -172,7 +172,7 @@ def setup_telemetry(app: FastAPI) -> None:
         logger.info(f"OTLP trace exporter configured for endpoint: {otlp_endpoint}")
       except Exception as e:
         logger.error(f"Failed to configure OTLP trace exporter: {e}")
-    elif otlp_endpoint == "http://localhost:4318" and env.is_development():
+    elif otlp_endpoint == "http://localhost:4318" and env.is_single_node():
       logger.info(
         "Skipping OTLP trace exporter for localhost endpoint in dev environment (use observability profile)"
       )

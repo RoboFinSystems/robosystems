@@ -72,6 +72,7 @@ class TestConnectionCredentialsModel:
     """Test falling back to JWT_SECRET_KEY when CONNECTION_CREDENTIALS_KEY is not set."""
     mock_env.CONNECTION_CREDENTIALS_KEY = None
     mock_env.JWT_SECRET_KEY = "test_jwt_secret_key_123"
+    mock_env.is_deployed.return_value = False
 
     key = ConnectionCredentials._get_encryption_key()
 
@@ -86,6 +87,7 @@ class TestConnectionCredentialsModel:
     """Test error when no encryption keys are available."""
     mock_env.CONNECTION_CREDENTIALS_KEY = None
     mock_env.JWT_SECRET_KEY = None
+    mock_env.is_deployed.return_value = False
 
     with pytest.raises(ValueError, match="CONNECTION_CREDENTIALS_KEY must be set"):
       ConnectionCredentials._get_encryption_key()
@@ -98,6 +100,7 @@ class TestConnectionCredentialsModel:
     mock_env.CONNECTION_CREDENTIALS_KEY = None
     mock_env.JWT_SECRET_KEY = "some_jwt_secret_value_long_enough_for_validation"
     mock_env.ENVIRONMENT = "prod"
+    mock_env.is_deployed.return_value = True
 
     with pytest.raises(ValueError, match="CONNECTION_CREDENTIALS_KEY must be set"):
       ConnectionCredentials._get_encryption_key()
@@ -108,6 +111,7 @@ class TestConnectionCredentialsModel:
     mock_env.CONNECTION_CREDENTIALS_KEY = None
     mock_env.JWT_SECRET_KEY = "some_jwt_secret_value_long_enough_for_validation"
     mock_env.ENVIRONMENT = "staging"
+    mock_env.is_deployed.return_value = True
 
     with pytest.raises(ValueError, match="CONNECTION_CREDENTIALS_KEY must be set"):
       ConnectionCredentials._get_encryption_key()
@@ -118,6 +122,7 @@ class TestConnectionCredentialsModel:
     """Dev/local may still derive a key from JWT_SECRET_KEY (convenience only)."""
     mock_env.CONNECTION_CREDENTIALS_KEY = None
     mock_env.JWT_SECRET_KEY = "test_jwt_secret_key_123"
+    mock_env.is_deployed.return_value = False
     mock_env.ENVIRONMENT = "dev"
 
     key = ConnectionCredentials._get_encryption_key()
@@ -138,6 +143,7 @@ class TestConnectionCredentialsModel:
     mock_env.CONNECTION_CREDENTIALS_KEY = example["CONNECTION_CREDENTIALS_KEY"]
     mock_env.JWT_SECRET_KEY = example["JWT_SECRET_KEY"]
     mock_env.ENVIRONMENT = "dev"
+    mock_env.is_deployed.return_value = False
 
     Fernet(ConnectionCredentials._get_encryption_key())
 

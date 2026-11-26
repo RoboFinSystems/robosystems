@@ -277,7 +277,7 @@ async def delete_subgraph_op(
       GraphDeprovisionService,
     )
 
-    await GraphDeprovisionService(env.ENVIRONMENT).release_subgraph_records(
+    await GraphDeprovisionService(env.STACK_ENVIRONMENT).release_subgraph_records(
       subgraph_id, db
     )
     subgraph.delete(db)

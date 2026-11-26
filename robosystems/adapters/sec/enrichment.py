@@ -190,7 +190,7 @@ class SemanticEnricher:
 
     os.makedirs(os.path.dirname(path), exist_ok=True)
 
-    if env.is_development():
+    if env.is_single_node():
       return self._download_artifact_r2(name, path)
 
     return self._download_artifact_s3(name, path)

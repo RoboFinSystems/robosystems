@@ -74,7 +74,7 @@ def publish_to_huggingface(
   """
   context.log.info(f"Publishing {graph_id} R2 snapshot to Hugging Face {repo_id}")
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping Hugging Face publish in dev environment")
     return MaterializeResult(
       metadata={

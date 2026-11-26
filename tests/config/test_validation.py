@@ -118,6 +118,42 @@ class TestParameterStoreReachability:
       EnvValidator.validate_required_vars(cfg)  # does not raise
 
 
+class TestSelfhost:
+  """selfhost has no SSM, so the reachability assertion is not its; it is held
+  to the deployed posture's required secrets."""
+
+  def _selfhost(self):
+    cfg = MockEnvConfig()
+    cfg.ENVIRONMENT = "selfhost"
+    cfg.PARAMETER_STORE_AVAILABLE = False
+    cfg.FEATURE_FLAGS_PRELOADED = False
+    cfg.PRELOADED_FEATURE_FLAG_NAMES = frozenset()
+    cfg.RATE_LIMIT_ENABLED = False
+    return cfg
+
+  def test_boots_without_ssm(self):
+    with patch("os.getenv", return_value=None):
+      EnvValidator.validate_required_vars(self._selfhost())  # does not raise
+
+  def test_requires_the_credentials_key(self):
+    cfg = self._selfhost()
+    cfg.CONNECTION_CREDENTIALS_KEY = ""
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(cfg)
+
+  def test_refuses_the_example_jwt_placeholder(self):
+    cfg = self._selfhost()
+    cfg.JWT_SECRET_KEY = "your-random-32-byte-jwt-secret-key-here"
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(cfg)
+
+  def test_an_unknown_environment_still_fails_closed(self):
+    cfg = self._selfhost()
+    cfg.ENVIRONMENT = "prodd"
+    with pytest.raises(ConfigValidationError):
+      EnvValidator.validate_required_vars(cfg)
+
+
 class TestConfigValidationError:
   """Test suite for ConfigValidationError exception."""
 

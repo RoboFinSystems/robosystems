@@ -23,7 +23,7 @@ MAX_RETENTION_DAYS = 90
 
 _SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.ENVIRONMENT != "dev"
+  if env.STACK_ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

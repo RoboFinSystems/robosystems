@@ -292,6 +292,29 @@ def _get_shared_replica_alb_url_from_cloudformation() -> str:
 
 
 # ==========================================================================
+# ENVIRONMENTS
+# ==========================================================================
+# ENVIRONMENT answers two questions. What infrastructure the process runs on:
+# the AWS fleet (prod, staging) or the single-node compose stack (dev and
+# selfhost). And how strict it is: dev relaxes for development, everything
+# else is held to the deployed posture. selfhost is the compose stack run for
+# real by someone else (RoboSystems Serve, or a machine they own), so it takes
+# the dev stack's infrastructure and the deployed posture.
+AWS_ENVIRONMENTS = frozenset({"prod", "production", "staging", "stage"})
+DEVELOPMENT_ENVIRONMENTS = frozenset({"dev", "development", "local"})
+SELFHOST_ENVIRONMENTS = frozenset({"selfhost"})
+SINGLE_NODE_ENVIRONMENTS = DEVELOPMENT_ENVIRONMENTS | SELFHOST_ENVIRONMENTS
+DEPLOYED_ENVIRONMENTS = AWS_ENVIRONMENTS | SELFHOST_ENVIRONMENTS
+
+
+def stack_environment(environment: str) -> str:
+  """The environment that names and shapes the infrastructure: ``dev`` for
+  every single-node stack, so a self-hosted one keeps the dev stack's tables,
+  namespaces and code paths; otherwise ``environment`` itself."""
+  return "dev" if environment.lower() in SELFHOST_ENVIRONMENTS else environment
+
+
+# ==========================================================================
 # MAIN CONFIGURATION CLASS
 # ==========================================================================
 
@@ -718,13 +741,16 @@ class EnvConfig:
 
   # DynamoDB registries
   GRAPH_REGISTRY_TABLE = get_str_env(
-    "GRAPH_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-graph-registry"
+    "GRAPH_REGISTRY_TABLE",
+    f"robosystems-graph-{stack_environment(ENVIRONMENT)}-graph-registry",
   )
   INSTANCE_REGISTRY_TABLE = get_str_env(
-    "INSTANCE_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-instance-registry"
+    "INSTANCE_REGISTRY_TABLE",
+    f"robosystems-graph-{stack_environment(ENVIRONMENT)}-instance-registry",
   )
   VOLUME_REGISTRY_TABLE = get_str_env(
-    "VOLUME_REGISTRY_TABLE", f"robosystems-graph-{ENVIRONMENT}-volume-registry"
+    "VOLUME_REGISTRY_TABLE",
+    f"robosystems-graph-{stack_environment(ENVIRONMENT)}-volume-registry",
   )
 
   # The single writer hosting shared repositories; adapter pipelines scale it
@@ -1072,6 +1098,12 @@ class EnvConfig:
   # HELPER METHODS
   # ==========================================================================
 
+  @property
+  def STACK_ENVIRONMENT(self) -> str:
+    """Resource names, registry tables and infrastructure code paths read
+    this, never ENVIRONMENT: see ``stack_environment``."""
+    return stack_environment(self.ENVIRONMENT)
+
   @classmethod
   def is_production(cls) -> bool:
     """Check if running in production environment."""
@@ -1088,8 +1120,25 @@ class EnvConfig:
 
   @classmethod
   def is_development(cls) -> bool:
-    """Check if running in development environment."""
-    return cls.ENVIRONMENT.lower() in ["dev", "development", "local"]
+    """Local development: the relaxed posture. False on a self-hosted stack,
+    which shares the infrastructure but not the shortcuts; for the
+    infrastructure, ask ``is_single_node``."""
+    return cls.ENVIRONMENT.lower() in DEVELOPMENT_ENVIRONMENTS
+
+  @classmethod
+  def is_selfhost(cls) -> bool:
+    """The compose stack run for real by someone else."""
+    return cls.ENVIRONMENT.lower() in SELFHOST_ENVIRONMENTS
+
+  @classmethod
+  def is_single_node(cls) -> bool:
+    """The compose stack on one machine (dev or selfhost), not the AWS fleet."""
+    return cls.ENVIRONMENT.lower() in SINGLE_NODE_ENVIRONMENTS
+
+  @classmethod
+  def is_deployed(cls) -> bool:
+    """Held to the deployed posture: prod, staging and selfhost."""
+    return cls.ENVIRONMENT.lower() in DEPLOYED_ENVIRONMENTS
 
   @classmethod
   def is_staging(cls) -> bool:
@@ -1104,7 +1153,7 @@ class EnvConfig:
   @classmethod
   def is_aws_environment(cls) -> bool:
     """Check if running in AWS environment (production or staging)."""
-    return cls.ENVIRONMENT.lower() in ["prod", "production", "staging", "stage"]
+    return cls.ENVIRONMENT.lower() in AWS_ENVIRONMENTS
 
   @classmethod
   def get_environment_key(cls) -> str:
@@ -1179,13 +1228,13 @@ class EnvConfig:
             # Dev may override via LBUG_DATABASES_PER_INSTANCE.
             "databases_per_instance": (
               get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
-              if cls.ENVIRONMENT == "dev"
+              if stack_environment(cls.ENVIRONMENT) == "dev"
               and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get("databases_per_instance", 10)
             ),
             "max_databases": (
               get_int_env("LBUG_DATABASES_PER_INSTANCE", 0)
-              if cls.ENVIRONMENT == "dev"
+              if stack_environment(cls.ENVIRONMENT) == "dev"
               and get_int_env("LBUG_DATABASES_PER_INSTANCE", 0) > 0
               else instance_config.get("databases_per_instance", 10)
             ),
@@ -1300,11 +1349,11 @@ class EnvConfig:
   def get_main_cors_origins(cls) -> list[str]:
     """CORS origins for the main API.
 
-    Deployed environments derive them from the app URLs, so a fork on its own
-    domain needs no code change. Also backs OAuth redirect_uri validation and
-    the MCP remote origin check.
+    Deployed environments (selfhost included) derive them from the app URLs,
+    so a fork or a self-hosted stack on its own domain needs no code change.
+    Also backs OAuth redirect_uri validation and the MCP remote origin check.
     """
-    if cls.is_production() or cls.is_staging():
+    if cls.is_deployed():
       origins = []
       for url in (
         cls.ROBOLEDGER_URL,
@@ -1346,7 +1395,7 @@ class EnvConfig:
     """
     if cls.PASSKEY_RP_ID:
       return cls.PASSKEY_RP_ID
-    if cls.is_production() or cls.is_staging():
+    if cls.is_deployed():
       return urlparse((cls.ROBOSYSTEMS_URL or "").strip()).hostname or ""
     return "localhost"
 
@@ -1355,14 +1404,14 @@ class EnvConfig:
     """Expected WebAuthn ceremony origin: the login home's origin."""
     if cls.PASSKEY_ORIGIN:
       return cls.PASSKEY_ORIGIN
-    if cls.is_production() or cls.is_staging():
+    if cls.is_deployed():
       return _url_origin(cls.ROBOSYSTEMS_URL) or ""
     return "http://localhost:3000"
 
   @classmethod
   def get_lbug_cors_origins(cls) -> list[str]:
     """Get CORS origins for Graph API (VPC-internal)."""
-    if cls.is_production() or cls.is_staging():
+    if cls.is_deployed():
       return []
     else:
       return ["*"]

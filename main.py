@@ -139,7 +139,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Configuration validated successfully: {config_summary}")
   except Exception as e:
     logger.error(f"Configuration validation failed: {e}")
-    if env.ENVIRONMENT in ("prod", "staging"):
+    if env.is_deployed():
       raise
     logger.warning("Continuing with invalid configuration (development mode)")
 
@@ -365,7 +365,7 @@ def create_app() -> FastAPI:
     if path in ("/", "/openapi.json") or path.startswith("/static"):
       response.headers["X-Robots-Tag"] = "noindex"
 
-    if env.ENVIRONMENT in ["prod", "staging"]:
+    if env.is_deployed():
       response.headers["Strict-Transport-Security"] = (
         "max-age=31536000; includeSubDomains"
       )

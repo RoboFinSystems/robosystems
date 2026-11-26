@@ -25,7 +25,7 @@ def _capture_stats(context: AssetExecutionContext) -> dict[str, Any] | None:
   """
   from robosystems.graph_api.client.factory import get_graph_client_for_sec_ingestion
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     return None
 
   async def _execute():

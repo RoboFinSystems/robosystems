@@ -56,8 +56,9 @@ ensure_database_exists() {
         return 0
     fi
 
+    # The single-node stacks (dev, selfhost) run their own Postgres without TLS.
     local sslmode="require"
-    if [[ "${ENVIRONMENT:-}" == "dev" ]]; then
+    if [[ "${ENVIRONMENT:-}" == "dev" || "${ENVIRONMENT:-}" == "selfhost" ]]; then
         sslmode="disable"
     fi
 
@@ -92,7 +93,7 @@ resolve_feature_flag() {
     # In staging/prod, read from SSM Parameter Store via boto3.
     # The runtime image does not ship the awscli binary, but boto3 is in the
     # application venv, so we shell out to Python instead.
-    if [[ "${ENVIRONMENT:-dev}" != "dev" ]]; then
+    if [[ "${ENVIRONMENT:-dev}" == "prod" || "${ENVIRONMENT:-dev}" == "staging" ]]; then
         local ssm_path="/robosystems/${ENVIRONMENT}/features/${flag_name}"
         local ssm_value
         ssm_value=$(python -c "

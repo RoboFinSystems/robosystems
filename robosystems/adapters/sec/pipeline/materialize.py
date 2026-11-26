@@ -191,7 +191,9 @@ def sec_historical_materialized(
       subgraph_name="historical",
       description="SEC Historical Filings (2009-2023)",
       created_by="system",
-      instance_id="local-dev" if env.ENVIRONMENT == "dev" else "ladybug-shared-prod",
+      instance_id="local-dev"
+      if env.STACK_ENVIRONMENT == "dev"
+      else "ladybug-shared-prod",
     )
     context.log.info(f"Subgraph status: {subgraph_result.get('status')}")
 

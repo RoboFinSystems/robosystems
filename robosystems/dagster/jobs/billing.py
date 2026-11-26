@@ -27,7 +27,7 @@ from robosystems.operations.graph.credit_service import CreditService
 
 BILLING_SCHEDULE_STATUS = (
   DefaultScheduleStatus.RUNNING
-  if env.ENVIRONMENT != "dev"
+  if env.STACK_ENVIRONMENT != "dev"
   else DefaultScheduleStatus.STOPPED
 )
 

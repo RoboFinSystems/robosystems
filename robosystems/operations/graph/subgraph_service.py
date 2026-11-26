@@ -30,7 +30,9 @@ class SubgraphService:
   """Create, delete, and inspect subgraphs on their parent's instance."""
 
   def __init__(self):
-    self.allocation_manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+    self.allocation_manager = LadybugAllocationManager(
+      environment=env.STACK_ENVIRONMENT
+    )
 
   async def create_subgraph_database(
     self,
@@ -123,7 +125,7 @@ class SubgraphService:
       # Local dev has the one writer behind GRAPH_API_URL, so its location is
       # synthesised rather than looked up. The environment decides, as in
       # delete.
-      if env.is_development() and bool(env.GRAPH_API_URL):
+      if env.is_single_node() and bool(env.GRAPH_API_URL):
         from dataclasses import dataclass
 
         @dataclass
@@ -427,7 +429,7 @@ class SubgraphService:
 
       # The environment decides, never GRAPH_API_URL: it is unset in
       # production and falls back to localhost.
-      is_local = env.is_development() and bool(env.GRAPH_API_URL)
+      is_local = env.is_single_node() and bool(env.GRAPH_API_URL)
 
       parent_location = None
       if is_local:
@@ -839,7 +841,7 @@ class SubgraphService:
 
       # The environment decides, never GRAPH_API_URL: it is unset in
       # production and falls back to localhost.
-      is_local = env.is_development() and bool(env.GRAPH_API_URL)
+      is_local = env.is_single_node() and bool(env.GRAPH_API_URL)
 
       if is_local:
         logger.info(f"Using local Graph API URL: {env.GRAPH_API_URL}")

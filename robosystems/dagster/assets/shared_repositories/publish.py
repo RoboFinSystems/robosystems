@@ -50,7 +50,7 @@ def publish_to_s3(
   """
   context.log.info(f"Publishing {graph_id} database to S3 for replica cluster")
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping S3 publish in dev environment")
     return MaterializeResult(
       metadata={
@@ -114,7 +114,7 @@ def publish_duckdb_to_s3(
   """
   context.log.info(f"Publishing {graph_id} DuckDB staging to S3")
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping DuckDB S3 publish in dev environment")
     return MaterializeResult(
       metadata={
@@ -256,7 +256,7 @@ def publish_to_r2(
   """
   context.log.info(f"Publishing {graph_id} database to R2 for subscriber downloads")
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping R2 publish in dev environment")
     return MaterializeResult(
       metadata={

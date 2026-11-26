@@ -412,7 +412,7 @@ The sync loads amounts in USD only. A sync that finds a transaction in another c
 
 ## Self-hosted deployments
 
-Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). Everything on this page applies unchanged once the connection exists, with one difference: on a development stack (`ENVIRONMENT=dev`) the daily sync schedule is stopped until you start it in the Dagster UI. Its cadence is `CONNECTION_SYNC_INTERVAL_HOURS` (default 24). Use `http://localhost:8000` and the key from `just demo-user`.
+Connecting QuickBooks to your own stack needs your own Intuit app, OAuth redirect and tunnel. That setup is on [Connecting QuickBooks Locally](Connecting-QuickBooks-Locally.md). Everything on this page applies unchanged once the connection exists, with one difference: on a compose stack (`ENVIRONMENT=dev` or `selfhost`) the daily sync schedule is stopped until you start it in the Dagster UI. Its cadence is `CONNECTION_SYNC_INTERVAL_HOURS` (default 24). Use `http://localhost:8000` and the key from `just demo-user`.
 
 ## Related Documentation
 

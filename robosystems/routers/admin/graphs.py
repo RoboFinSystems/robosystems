@@ -368,7 +368,7 @@ async def deprovision_graph(
 
   session = next(get_db_session())
   try:
-    service = GraphDeprovisionService(environment=app_env.ENVIRONMENT)
+    service = GraphDeprovisionService(environment=app_env.STACK_ENVIRONMENT)
     result = await service.deprovision_graph(
       graph_id,
       session,
