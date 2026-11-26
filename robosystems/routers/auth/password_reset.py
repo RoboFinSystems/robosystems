@@ -192,10 +192,13 @@ async def reset_password(
   session: Session = Depends(get_async_db_session),
   _password_auth: None = Depends(require_password_auth),
 ) -> AuthResponse:
+  # Redeemed in this request's transaction: the commit below makes it final,
+  # and any refusal before it rolls back and leaves the token usable.
   user_id = UserToken.verify_token(
     raw_token=request.token,
     token_type="password_reset",
     session=session,
+    auto_commit=False,
   )
 
   if not user_id:
@@ -206,6 +209,7 @@ async def reset_password(
 
   user = User.get_by_id(user_id, session)
   if not user:
+    session.rollback()
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="User not found",
@@ -221,6 +225,7 @@ async def reset_password(
       details={"failure_reason": "password_reset_on_passwordless_account"},
       risk_level="medium",
     )
+    session.rollback()
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail="Invalid or expired reset token",
@@ -229,6 +234,7 @@ async def reset_password(
   # Same rules as the /password/check endpoint.
   password_result = PasswordSecurity.validate_password(request.new_password)
   if not password_result.is_valid:
+    session.rollback()
     raise HTTPException(
       status_code=status.HTTP_400_BAD_REQUEST,
       detail=f"Password requirements not met: {', '.join(password_result.errors)}",
@@ -236,14 +242,19 @@ async def reset_password(
 
   password_hash = await hash_password_async(request.new_password)
 
-  user.update(session, password_hash=password_hash)
-
-  # Bumping session_version invalidates every existing JWT, including the
-  # refresh chain, on its next request.
+  # One commit carries the redeemed token, the new hash and the bumped
+  # session_version (which invalidates every existing JWT and OAuth token), so
+  # a reset never lands with the old sessions still live.
+  user.update(session, auto_commit=False, password_hash=password_hash)
   try:
     user.invalidate_sessions(session)
-  except Exception as invalidate_err:
-    logger.error(f"Error invalidating sessions during password reset: {invalidate_err}")
+  except Exception as reset_err:
+    session.rollback()
+    logger.error(f"Password reset failed to commit: {reset_err}")
+    raise HTTPException(
+      status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+      detail="Password reset failed. Please try again.",
+    ) from reset_err
 
   client_ip = fastapi_request.client.host if fastapi_request.client else None
   user_agent = fastapi_request.headers.get("user-agent")

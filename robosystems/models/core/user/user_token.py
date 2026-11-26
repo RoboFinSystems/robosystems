@@ -4,7 +4,7 @@ import hashlib
 import secrets
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import Column, DateTime, Index, String, Text
+from sqlalchemy import Column, DateTime, Index, String, Text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -90,39 +90,50 @@ class UserToken(Model):
 
   @classmethod
   def verify_token(
-    cls, raw_token: str, token_type: str, session: Session
+    cls,
+    raw_token: str,
+    token_type: str,
+    session: Session,
+    auto_commit: bool = True,
   ) -> str | None:
     """Verify a token and consume it, returning its user_id or None.
 
-    Marks the row used, so a second call with the same token fails.
+    One conditional UPDATE marks the row used, so of two concurrent calls with
+    the same token only one succeeds. With ``auto_commit=False`` the caller's
+    commit makes the redemption final and its rollback returns the token.
     """
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+    now = datetime.now(UTC)
 
-    token = (
-      session.query(cls)
-      .filter(
-        cls.token_hash == token_hash,
-        cls.token_type == token_type,
-        cls.used_at.is_(None),
-        cls.expires_at > datetime.now(UTC),
-      )
-      .first()
-    )
-
-    if not token:
-      logger.warning(f"Invalid or expired {token_type} token attempted")
-      return None
-
-    token.used_at = datetime.now(UTC)
     try:
-      session.commit()
-      logger.info(f"Successfully verified {token_type} token for user {token.user_id}")
+      user_id = session.execute(
+        update(cls)
+        .where(
+          cls.token_hash == token_hash,
+          cls.token_type == token_type,
+          cls.used_at.is_(None),
+          cls.expires_at > now,
+        )
+        .values(used_at=now)
+        .returning(cls.user_id)
+        .execution_options(synchronize_session=False)
+      ).scalar_one_or_none()
+
+      if user_id is None:
+        if auto_commit:
+          session.rollback()
+        logger.warning(f"Invalid or expired {token_type} token attempted")
+        return None
+
+      if auto_commit:
+        session.commit()
+      logger.info(f"Successfully verified {token_type} token for user {user_id}")
     except SQLAlchemyError as e:
       session.rollback()
       logger.error(f"Failed to mark token as used: {e}")
       raise
 
-    return token.user_id
+    return user_id
 
   @classmethod
   def validate_token(
