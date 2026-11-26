@@ -193,6 +193,43 @@ class TestUserTokenModel:
     )
     assert result2 is None
 
+  def test_uncommitted_redemption_is_returned_by_rollback(self, db_session):
+    """auto_commit=False leaves the redemption to the caller's transaction."""
+    raw_token = UserToken.create_token(
+      user_id="user_txn",
+      token_type="password_reset",
+      hours=1,
+      session=db_session,
+    )
+
+    assert (
+      UserToken.verify_token(
+        raw_token=raw_token,
+        token_type="password_reset",
+        session=db_session,
+        auto_commit=False,
+      )
+      == "user_txn"
+    )
+    db_session.rollback()
+
+    assert (
+      UserToken.verify_token(
+        raw_token=raw_token,
+        token_type="password_reset",
+        session=db_session,
+      )
+      == "user_txn"
+    )
+    assert (
+      UserToken.verify_token(
+        raw_token=raw_token,
+        token_type="password_reset",
+        session=db_session,
+      )
+      is None
+    )
+
   def test_validate_token(self, db_session):
     """Test validating a token without consuming it."""
     user_id = "user_validate"

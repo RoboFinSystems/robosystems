@@ -408,13 +408,21 @@ async def _resolve_group_parent(graph_id: str) -> str:
     raise RuntimeError(f"Group parent lookup failed: {exc}") from exc
 
 
+def _sql_literal(value: str) -> str:
+  """``value`` escaped for the inside of a single-quoted DuckDB literal."""
+  return value.replace("'", "''")
+
+
 def _staging_sql(graph_id: str, entity_id: str, connstr: str) -> dict[str, str]:
   """``{table_name: CREATE TABLE SQL}`` for every node and relationship table.
 
   Each statement builds a DuckDB table from ``postgres_scan()`` whose columns
   match the graph schema exactly, ready to COPY into LadybugDB.
   """
-  c = connstr  # shorthand for SQL interpolation
+  # Every value below lands inside a single-quoted SQL literal.
+  graph_id = _sql_literal(graph_id)
+  entity_id = _sql_literal(entity_id)
+  c = _sql_literal(connstr)  # shorthand for SQL interpolation
   s = graph_id  # tenant schema name in the extensions database
   # `is_live` includes a `reversed` original: its reversal only nets to zero
   # if both halves are summed. Shared predicate with the OLTP reads.

@@ -112,6 +112,16 @@ class TestBuildPostgresConnstr:
 
 
 class TestStagingSql:
+  def test_quotes_in_values_stay_inside_their_literals(self):
+    tables = _staging_sql("kg'x", "ent'y", "dbname=d password=p'w")
+    sql = "\n".join(tables.values())
+    assert "'kg''x'" in sql
+    assert "'kg''x_coa'" in sql
+    assert "'ent''y'" in sql
+    assert "'dbname=d password=p''w'" in sql
+    for raw in ("kg'x", "ent'y", "p'w"):
+      assert raw not in sql
+
   def test_generates_all_tables(self):
     tables = _staging_sql(GRAPH_ID, ENTITY_ID, CONNSTR)
     expected = set(NODE_TABLES + RELATIONSHIP_TABLES)

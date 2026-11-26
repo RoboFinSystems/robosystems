@@ -233,6 +233,7 @@ class TestPasswordResetEndpoints:
       raw_token="valid_reset_token",
       token_type="password_reset",
       session=test_db,
+      auto_commit=False,
     )
 
     # Verify password was hashed
@@ -240,7 +241,7 @@ class TestPasswordResetEndpoints:
 
     # Verify user was updated with new password
     mock_user.update.assert_called_once_with(
-      test_db, password_hash="hashed_new_password"
+      test_db, auto_commit=False, password_hash="hashed_new_password"
     )
 
   @pytest.mark.asyncio
@@ -282,6 +283,37 @@ class TestPasswordResetEndpoints:
     assert response.status_code == 400
     data = response.json()
     assert data["detail"] == "User not found"
+
+  @pytest.mark.asyncio
+  @patch.object(UserToken, "verify_token")
+  @patch.object(User, "get_by_id")
+  @patch(
+    "robosystems.routers.auth.password_reset.hash_password_async",
+    new_callable=AsyncMock,
+  )
+  async def test_reset_fails_whole_when_sessions_cannot_be_invalidated(
+    self, mock_hash_password, mock_get_user, mock_verify_token, client, test_db
+  ):
+    """A reset that cannot invalidate the old sessions does not land at all."""
+    mock_verify_token.return_value = "user_reset_500"
+
+    mock_user = Mock(spec=User)
+    mock_user.id = "user_reset_500"
+    mock_user.email = "reset500@example.com"
+    mock_user.name = "Reset User"
+    mock_user.password_hash = "old_hash"
+    mock_user.update = Mock()
+    mock_user.invalidate_sessions = Mock(side_effect=RuntimeError("commit failed"))
+    mock_get_user.return_value = mock_user
+    mock_hash_password.return_value = "hashed_new_password"
+
+    response = client.post(
+      "/v1/auth/password/reset",
+      json={"token": "valid_reset_token", "new_password": "NewS3cur3P@ssw0rd!"},
+    )
+
+    assert response.status_code == 500
+    assert "token" not in response.json()
 
   @pytest.mark.asyncio
   async def test_reset_password_weak_password(self, client):
