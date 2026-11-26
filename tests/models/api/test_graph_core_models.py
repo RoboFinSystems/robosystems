@@ -26,6 +26,11 @@ from robosystems.models.api.graphs.tier import (
   TierCapacity,
 )
 
+ITEM_NODE = {
+  "name": "Item",
+  "properties": [{"name": "id", "type": "STRING", "is_primary_key": True}],
+}
+
 
 @pytest.mark.unit
 class TestGraphMetadata:
@@ -121,12 +126,28 @@ class TestCreateGraphRequest:
         version="1.0.0",
         description=None,
         extends=None,
-        nodes=[],
+        nodes=[ITEM_NODE],
         relationships=[],
       ),
     )
     assert model.initial_entity is None
     assert model.custom_schema is not None
+
+  def test_custom_schema_without_a_node_is_refused(self):
+    from robosystems.models.api.graphs.schema import CustomSchemaDefinition
+
+    with pytest.raises(ValidationError, match="at least one node"):
+      CustomSchemaDefinition.model_validate(
+        {"name": "test", "nodes": [], "relationships": []}
+      )
+    with pytest.raises(ValidationError, match="at least one node"):
+      CustomSchemaDefinition.model_validate({"name": "test"})
+
+  def test_custom_schema_extending_base_needs_no_node_of_its_own(self):
+    from robosystems.models.api.graphs.schema import CustomSchemaDefinition
+
+    schema = CustomSchemaDefinition.model_validate({"name": "test", "extends": "base"})
+    assert schema.nodes == []
 
   def test_all_valid_tiers(self):
     for tier in ["ladybug-standard", "ladybug-large", "ladybug-xlarge"]:

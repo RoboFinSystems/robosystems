@@ -708,7 +708,12 @@ class TestDataModels:
         version="1.0.0",
         description=None,
         extends=None,
-        nodes=[],
+        nodes=[
+          {
+            "name": "Item",
+            "properties": [{"name": "id", "type": "STRING", "is_primary_key": True}],
+          }
+        ],
         relationships=[],
       ),
       initial_entity=InitialEntityData(

@@ -227,7 +227,15 @@ class CreateGraphRequest(BaseModel):
           "custom_schema": {
             "name": "customer_analytics",
             "version": "1.0.0",
-            "nodes": [],
+            "nodes": [
+              {
+                "name": "Customer",
+                "properties": [
+                  {"name": "identifier", "type": "STRING", "is_primary_key": True},
+                  {"name": "name", "type": "STRING", "nullable": False},
+                ],
+              }
+            ],
             "relationships": [],
           },
           "tags": ["analytics", "customers", "marketing"],
