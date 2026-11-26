@@ -20,6 +20,7 @@
 
 ### Connect AI, Documents & Search
 - [AI Operators & MCP](AI-Operators-and-MCP.md)
+- [The MCP Bridge](The-MCP-Bridge.md)
 - [Search & AI Retrieval](Search-and-AI-Retrieval.md)
 - [Document Management](Document-Management.md)
 

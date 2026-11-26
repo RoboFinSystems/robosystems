@@ -402,7 +402,7 @@ claude mcp add --transport http robosystems-roboledger \
   --header "X-API-Key: <your key>"
 ```
 
-See [AI Operators & MCP](AI-Operators-and-MCP.md) for the header-less connector form and the stdio bridge. Once connected, try:
+See [AI Operators & MCP](AI-Operators-and-MCP.md) for the header-less connector form, and [The MCP Bridge](The-MCP-Bridge.md) for one connection across graphs. Once connected, try:
 
 ```text
 "What entities are in this graph?"

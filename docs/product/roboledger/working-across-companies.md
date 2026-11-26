@@ -60,7 +60,7 @@ In Claude Code, the name is the first thing you type:
 claude mcp add --transport http cadence-labs https://api.robosystems.ai/v1/graphs/{graph_id}/mcp
 ```
 
-Named connectors are how you and your assistant tell clients apart. In a conversation about one client, start by asking which graph it's connected to. Setup for each client is in [Connect Claude, ChatGPT or any MCP client](https://robosystems.ai/docs/guides/connect-an-mcp-client).
+Named connectors are how you and your assistant tell clients apart. In a conversation about one client, start by asking which graph it's connected to. Setup for each client is in [Connect Claude, ChatGPT or any MCP client](https://robosystems.ai/docs/guides/connect-an-mcp-client). That page also has a developer route that reaches every graph through one local connection with an API key.
 
 ## Share a client's reports
 
