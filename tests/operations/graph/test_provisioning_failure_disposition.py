@@ -245,7 +245,7 @@ async def test_a_checkout_generic_graph_keeps_its_custom_schema(
   """Checkout stores the create form in resource_config, which lands in
   subscription_metadata; the pasted schema must reach graph creation."""
   subscription_id, user_id = provisioning_fixture
-  schema = {"name": "supply", "nodes": [], "relationships": []}
+  schema = {"name": "supply", "nodes": [{"name": "Part"}], "relationships": []}
   row = _reload(db_session, subscription_id)
   row.subscription_metadata = {"graph_type": "generic", "custom_schema": schema}
   db_session.commit()

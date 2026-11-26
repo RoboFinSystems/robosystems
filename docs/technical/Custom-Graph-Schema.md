@@ -164,7 +164,7 @@ Node and relationship names are checked against a short reserved list (`SystemCo
 
 ### `extends: "base"`
 
-The schema also takes an optional top-level `extends`. Leave it out and the graph holds exactly the types you declare. Set `"extends": "base"` and the graph is created with the **whole platform base ontology** alongside yours — `Entity`, `Period`, `Unit`, `Element`, `Label`, `Reference`, `Taxonomy`, `Dimension`, `Structure`, `Association`, `Trait`, `Classification`, `Agent`, `Event` and their relationships — and any of your nodes or relationships whose name collides with a base one is **dropped**, with only a server-side warning. It does not add properties to your own nodes. The demo's `schema.json` doesn't use it — its keys are exactly `name`, `version`, `description`, `nodes`, `relationships`, and `metadata`.
+The schema also takes an optional top-level `extends`. Leave it out and the graph holds exactly the types you declare. A schema must then declare at least one node: one with none is refused with a `422`, since a graph cannot be created without a table. Set `"extends": "base"` and the graph is created with the **whole platform base ontology** alongside yours — `Entity`, `Period`, `Unit`, `Element`, `Label`, `Reference`, `Taxonomy`, `Dimension`, `Structure`, `Association`, `Trait`, `Classification`, `Agent`, `Event` and their relationships — and any of your nodes or relationships whose name collides with a base one is **dropped**, with only a server-side warning. It does not add properties to your own nodes. The demo's `schema.json` doesn't use it — its keys are exactly `name`, `version`, `description`, `nodes`, `relationships`, and `metadata`.
 
 ## Step-by-Step Walkthrough
 

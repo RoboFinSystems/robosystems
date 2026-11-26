@@ -188,7 +188,8 @@ def cleanup_orphaned_backups(
 def find_uncovered_graphs(session, staleness_cutoff: datetime) -> tuple[int, list[str]]:
   """Graphs that should have a recent scheduled backup and don't.
 
-  Returns ``(checked, uncovered)``. Scope must mirror the nightly schedule's.
+  Returns ``(checked, uncovered)``. Scope must mirror the nightly schedule's,
+  less graphs created inside the window: they have not yet met a nightly run.
   """
   from robosystems.config.shared_repositories import is_shared_repository_or_subgraph
   from robosystems.models.core import BackupInitiator, BackupStatus, Graph, GraphBackup
@@ -198,6 +199,7 @@ def find_uncovered_graphs(session, staleness_cutoff: datetime) -> tuple[int, lis
     .filter(
       Graph.graph_type.in_(("entity", "generic")),
       Graph.status == "active",
+      Graph.created_at < staleness_cutoff,
     )
     .all()
   )

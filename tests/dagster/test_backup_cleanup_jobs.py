@@ -368,6 +368,26 @@ class TestBackupCoverageAssertion:
     assert uncovered == ["kg_a"]
 
   @pytest.mark.unit
+  def test_graphs_younger_than_the_window_are_not_checked(self):
+    """A graph created after the last nightly run has had no chance at a backup."""
+    from datetime import UTC, datetime, timedelta
+    from unittest.mock import MagicMock, patch
+
+    from robosystems.dagster.jobs.backup_cleanup import find_uncovered_graphs
+
+    session = MagicMock()
+    session.query.return_value.filter.return_value.all.return_value = []
+
+    with patch(
+      "robosystems.config.shared_repositories.is_shared_repository_or_subgraph",
+      return_value=False,
+    ):
+      find_uncovered_graphs(session, datetime.now(UTC) - timedelta(days=2))
+
+    clauses = [str(c) for c in session.query.return_value.filter.call_args.args]
+    assert "graphs.created_at < :created_at_1" in clauses
+
+  @pytest.mark.unit
   def test_survives_a_query_failure_without_aborting_cleanup(self):
     """This op runs after the cleanup ops.
 

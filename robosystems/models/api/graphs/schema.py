@@ -11,8 +11,8 @@ class CustomSchemaDefinition(BaseModel):
   """Custom node and relationship types for a generic graph.
 
   For graphs that don't fit the entity-based schema — inventory, org charts,
-  project management. `extends` names a base schema to build on, or is
-  omitted for a bare database.
+  project management. `extends` names a base schema to build on. A
+  schema defines at least one node unless it extends `base`.
   """
 
   model_config = ConfigDict(
@@ -208,6 +208,16 @@ class CustomSchemaDefinition(BaseModel):
       for prop in rel.get("properties") or []:
         if "name" in prop:
           require_identifier(prop["name"], "property")
+    return self
+
+  @model_validator(mode="after")
+  def _defines_a_table(self) -> CustomSchemaDefinition:
+    # A graph cannot be provisioned without a node table: refuse it here, not
+    # midway through provisioning.
+    if not self.nodes and self.extends != "base":
+      raise ValueError(
+        "A custom schema must define at least one node, or extend 'base'."
+      )
     return self
 
 
