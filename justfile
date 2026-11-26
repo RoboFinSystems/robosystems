@@ -34,6 +34,7 @@ start profile="robosystems" build="":
     @test -f {{_env}} || cp .env.example {{_env}}
     @test -f {{_local_env}} || cp .env.local.example {{_local_env}}
     @just install-hooks
+    @bin/tools/data-dirs.sh
     {{ if build != "" { _build_local } else { "" } }} docker compose -f compose.yaml \
         --env-file {{_env}} --profile {{profile}} up --detach
 
@@ -60,6 +61,7 @@ settings-drift env=".env" example=".env.example" flags="":
 # Rebuild the images built here and force recreate (package/env changes); a published image is recreated as pulled
 rebuild profile="robosystems":
     @test -f {{_env}} || cp .env.example {{_env}}
+    @bin/tools/data-dirs.sh
     {{_build_local}} docker compose -f compose.yaml --env-file {{_env}} --profile {{profile}} up \
         --force-recreate --detach
 

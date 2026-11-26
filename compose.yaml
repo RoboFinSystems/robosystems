@@ -535,7 +535,9 @@ services:
       - NEXT_PUBLIC_ROBOLEDGER_APP_URL=${ROBOLEDGER_URL:-http://localhost:3001}
       - NEXT_PUBLIC_ROBOINVESTOR_APP_URL=${ROBOINVESTOR_URL:-http://localhost:3002}
       - NEXT_PUBLIC_S3_ENDPOINT_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}
-      - NEXT_PUBLIC_FILINGS_CDN_URL=${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}/robosystems-public-data
+      # The filing catalog: this stack's own public-data bucket unless
+      # FILINGS_CDN_URL names another, for a stack with no SEC pipeline.
+      - NEXT_PUBLIC_FILINGS_CDN_URL=${FILINGS_CDN_URL:-${AWS_S3_PRESIGN_ENDPOINT_URL:-http://localhost:8333}/robosystems-public-data}
       - NEXT_PUBLIC_MAINTENANCE_MODE=true
     ports:
       - "127.0.0.1:3002:3000"
