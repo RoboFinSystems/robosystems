@@ -292,6 +292,11 @@ create-release version="patch" deploy="staging":
 deploy environment="prod" ref="":
     @bin/tools/deploy.sh {{environment}} {{ref}}
 
+# RoboSystems Serve: the platform on one EC2 instance in your own AWS account: launch, status, upgrade, logs, restart, reboot, snapshot, set, tunnel, shell (no arguments lists them)
+[positional-arguments]
+serve *args="":
+    @bin/tools/serve.sh "$@"
+
 
 ## Bootstrap ##
 
