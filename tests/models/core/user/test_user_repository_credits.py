@@ -441,6 +441,53 @@ class TestUserRepositoryCredits:
     assert transaction is not None
     assert transaction.amount == Decimal("1000")
 
+  def test_the_reset_records_what_it_forfeits(self):
+    """Credits do not roll over: the unspent balance leaves on an EXPIRATION
+    line, so the pool's transactions sum to its balance."""
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("987.85"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=datetime.now(UTC) - timedelta(days=35),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    assert credits.allocate_monthly_credits(self.session) is True
+
+    lines = (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(credit_pool_id=credits.id)
+      .all()
+    )
+    by_type = {t.transaction_type: t.amount for t in lines}
+    assert by_type[UserRepositoryCreditTransactionType.EXPIRATION.value] == Decimal(
+      "-987.85"
+    )
+    assert Decimal("987.85") + sum(t.amount for t in lines) == credits.current_balance
+
+  def test_an_empty_pool_forfeits_nothing(self):
+    credits = UserRepositoryCredits(
+      user_repository_id=self.repo_access.id,
+      current_balance=Decimal("0"),
+      monthly_allocation=Decimal("1000"),
+      last_allocation_date=datetime.now(UTC) - timedelta(days=35),
+    )
+    self.session.add(credits)
+    self.session.commit()
+
+    credits.allocate_monthly_credits(self.session)
+
+    expired = (
+      self.session.query(UserRepositoryCreditTransaction)
+      .filter_by(
+        credit_pool_id=credits.id,
+        transaction_type=UserRepositoryCreditTransactionType.EXPIRATION.value,
+      )
+      .count()
+    )
+    assert expired == 0
+
   def test_allocate_monthly_credits_not_due(self):
     """Not due = already allocated this calendar month (the gate keys on
     last_allocation_date, matching the 1st-of-month cron)."""

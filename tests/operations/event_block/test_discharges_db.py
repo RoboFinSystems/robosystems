@@ -224,6 +224,28 @@ def test_money_out_settles_only_its_own_live_bills(session, target, reason):
     set_settlement_link(session, line, obligation.id)
 
 
+def test_a_journal_entry_settles_bills_without_cash(session):
+  """A creditor converts open bills into a note: the journal entry moving
+  them from payables carries no cash direction, so it may settle the bills
+  it names (or invoices, for receivables written off the same way)."""
+  first = _event(session, "bill_received", 300000)
+  second = _event(session, "bill_received", 198750)
+  entry = _event(session, "journal_entry_recorded", 498750, agent=None)
+
+  allocate(
+    session,
+    entry,
+    [
+      DischargeAllocation(obligation_event_id=first.id, amount=300000),
+      DischargeAllocation(obligation_event_id=second.id, amount=198750),
+    ],
+    "usr",
+  )
+  session.flush()
+
+  assert _open(session) == {}
+
+
 def test_allocations_never_apply_more_than_the_line_paid(session):
   bill = _event(session, "bill_received", 420000)
   line = _bank_line(session, -100000)

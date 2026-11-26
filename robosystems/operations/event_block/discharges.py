@@ -3,9 +3,10 @@ every write.
 
 A payment settles invoices when money comes in and bills when it goes out:
 ``payment_received`` and ``bill_paid`` say so by type, a bank line by the sign
-of its amount. The documents must be the payment's own entity's and not
-retracted. A different counterparty is allowed, since a parent can pay a
-subsidiary's bill. Allocations may not apply more than the payment's
+of its amount. A journal entry moves no cash, so it may settle either: bills a
+creditor converts into a note, or invoices written off. The documents must be
+the payment's own entity's and not retracted. A different counterparty is
+allowed, since a parent can pay a subsidiary's bill. Allocations may not apply more than the payment's
 magnitude; an overpayment shows as unapplied credit on the document instead.
 A QuickBooks payment's settlement is QuickBooks', written by the sync, and is
 changed there.
@@ -30,6 +31,9 @@ _SETTLES_BY_TYPE: dict[str, str] = {
   "bill_paid": "bill_received",
 }
 
+# A settlement without cash: the person naming the documents says which kind.
+_NO_CASH_DIRECTION = frozenset({"journal_entry_recorded"})
+
 _RETRACTED = ("voided", "superseded")
 
 # Sources whose sync writes what a payment settles from the source's own
@@ -43,11 +47,12 @@ class DischargeRefusedError(ValueError):
 
 def settles_type(payment: Event) -> str | None:
   """The obligation type ``payment`` settles: an invoice for money in, a bill
-  for money out. None for a payment with no amount to say which."""
+  for money out. None for a journal entry, or a payment with no amount to say
+  which."""
   by_type = _SETTLES_BY_TYPE.get(str(payment.event_type))
   if by_type is not None:
     return by_type
-  if not payment.amount:
+  if str(payment.event_type) in _NO_CASH_DIRECTION or not payment.amount:
     return None
   return "bill_received" if payment.amount < 0 else "invoice_issued"
 

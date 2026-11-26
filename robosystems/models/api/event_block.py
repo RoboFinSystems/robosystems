@@ -670,7 +670,9 @@ class UpdateEventBlockRequest(BaseModel):
       "most the payment's amount (the rest is unapplied). Replaces any held; "
       "an empty list clears them, and the settlement link becomes the first "
       "row's. Each must be an obligation of this event's entity, not voided: "
-      "an invoice for money in, a bill for money out. A person chooses them; "
+      "an invoice for money in, a bill for money out; a journal entry, which "
+      "moves no cash, may settle either (bills converted into a note). A "
+      "person chooses them; "
       "the open items a bank line may settle are `list-discharge-candidates` "
       "over MCP and `dischargeCandidates` over GraphQL."
     ),

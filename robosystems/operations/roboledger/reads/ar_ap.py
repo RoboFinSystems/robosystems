@@ -782,7 +782,9 @@ def list_discharge_candidates(
 ) -> DischargeCandidates | None:
   """The open items a payment or bank line may settle: its own entity's, its
   counterparty's when it names one, open at its date. An exact amount match
-  first, then the oldest due date. None when there is no such event."""
+  first, then the oldest due date. None when there is no such event. A journal
+  entry has no cash direction to pick bills or invoices by, so it is offered
+  none: the person names the documents it settles."""
   payment = session.get(Event, event_id)
   if payment is None:
     return None
