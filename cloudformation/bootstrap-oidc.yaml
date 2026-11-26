@@ -145,6 +145,19 @@ Resources:
                   - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}@*/${GitHubRepoName}@*:ref:refs/tags/v*
+                # The job's own workflow file, or the reusable one it calls: only
+                # the workflows that deploy. The owner and repo segments end in a
+                # wildcard so an immutable-style name would still match; the
+                # subject above is what binds the repository.
+                token.actions.githubusercontent.com:job_workflow_ref:
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/deploy-*.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/graph-*.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/build.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/prod.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/staging.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/publish-docs.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/secrets-rotation.yml@*
+                  - !Sub ${GitHubOrg}*/${GitHubRepoName}*/.github/workflows/service-refresh.yml@*
       Policies:
         - PolicyName: !Sub ${ServiceTag}DeploymentPolicy
           PolicyDocument:
@@ -654,6 +667,11 @@ Resources:
                   - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/heads/main
                   - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/heads/release/*
                   - !Sub repo:${GitHubOrg}@*/${GitHubViewerRepoName}@*:ref:refs/tags/v*
+                # Only the build and deploy workflows (see the backend role above).
+                # Kept to two short patterns: this trust is near IAM's size limit.
+                token.actions.githubusercontent.com:job_workflow_ref:
+                  - !Sub ${GitHubOrg}*/*/.github/workflows/deploy*.yml@*
+                  - !Sub ${GitHubOrg}*/*/.github/workflows/build.yml@*
       Policies:
         - PolicyName: !Sub ${ServiceTag}FrontendDeploymentPolicy
           PolicyDocument:

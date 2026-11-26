@@ -108,6 +108,8 @@ Bootstrap handles everything:
 - ECR Repository with lifecycle policy
 - SES email identity for your domain (DKIM verified, production access requested)
 
+Each deploy role trusts a fixed set of branches and tags and, within them, only the workflow files that deploy. A new workflow that needs AWS credentials has to be added to the role's trust in `cloudformation/bootstrap-oidc.yaml` (the `job_workflow_ref` list), then applied with `just bootstrap-oidc`.
+
 ### Optional GitHub Secrets
 
 These secrets are **not required** for deployment but enhance workflow functionality:
