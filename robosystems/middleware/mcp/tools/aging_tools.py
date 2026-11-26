@@ -45,7 +45,7 @@ class AgedBalancesTool:
 
 **RETURNS:**
 Amounts are in cents.
-- Without `agent_id`: `buckets` (current, 1–30, 31–60, 61–90 and over 90 days past due, and unapplied credit from overpayments), `agents` (a row per counterparty, largest first), `defaulted_due_date_count` (items with no due date of their own, aged as due on receipt), and `tie_outs`: each entity's open items against its control accounts, with `difference_cents` named and never plugged. For a group, `intercompany` holds the items the members owe each other, and `pairs` sets both sides of each pair side by side.
+- Without `agent_id`: `buckets` (current, 1–30, 31–60, 61–90 and over 90 days past due, and unapplied credit from overpayments), `agents` (a row per counterparty, largest first), `defaulted_due_date_count` (items with no due date of their own, aged as due on receipt), and `tie_outs`: each entity's open items against its control accounts, with `difference_cents` named and never plugged; `pending_close_cents` is what the close will post from documents already counted (a payment committed in an open month), so it is not a difference. For a group, `intercompany` holds the items the members owe each other, and `pairs` sets both sides of each pair side by side.
 - With `agent_id`: `items`, oldest first, each with its due date, `due_date_basis`, days past due and bucket.
 
 **RELATED TOOLS:**
