@@ -9,7 +9,7 @@ Work the vulnerability queue from its two sources, GitHub (Dependabot + code sca
 
 **Scope boundary.** `/security-audit` asks whether the detective controls are on; this works through what they find, against the SLA. `/security-review` and `/pr-review` look at code changes. A code-scanning alert that is a real defect in our code leaves this sweep as a fix in its own repo.
 
-Pairs with the `vulnerability-triage` runbook in `local/RoboSystems/runbooks/` — **read it first.** It holds the standing decisions (what is dismissed and why, which repos are excluded, which Vanta deactivations are live and when they expire). This file is the method; the runbook is the state, and it wins for this environment.
+Pairs with the `vulnerability-triage` runbook in the private design vault's `runbooks/` — **read it first.** It holds the standing decisions (what is dismissed and why, which repos are excluded, which Vanta deactivations are live and when they expire). This file is the method; the runbook is the state, and it wins for this environment.
 
 ## Guardrails
 

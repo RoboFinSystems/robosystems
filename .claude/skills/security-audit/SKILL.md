@@ -9,7 +9,7 @@ Run a read-only AWS + GitHub security-posture review, then produce a findings re
 
 **Scope boundary.** This is an infrastructure/cloud posture audit — detective controls, live findings, data protection. It is *not* a code review. `/security-review` reviews pending code changes on the current branch; `/pr-review` covers a PR's diff. Those look at what the code does; this looks at what the account is running. Keep them separate — don't fold diff review into this sweep.
 
-Pairs with the `security-posture-audit` runbook in `local/RoboSystems/runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live, account-specific record of what's currently enabled, suppressed, accepted, or retired, and it is authoritative for this environment.
+Pairs with the `security-posture-audit` runbook in the private design vault's `runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live, account-specific record of what's currently enabled, suppressed, accepted, or retired, and it is authoritative for this environment.
 
 ## Scope & guardrails
 

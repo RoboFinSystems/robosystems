@@ -7,7 +7,7 @@ metadata:
 
 Assess SOC 2 readiness: map the security posture to the Trust Services Criteria, inventory policies and evidence, and produce a readiness dashboard plus a before-vs-with-the-auditor remediation plan. This is the compliance-framed companion to `/security-audit` (which gathers the raw posture).
 
-Pairs with the `soc2-readiness-review` runbook in `local/RoboSystems/runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live record of the current TSC mapping, which evidence slots are filled, and what the compliance platform already automates. It is authoritative for this environment.
+Pairs with the `soc2-readiness-review` runbook in the private design vault's `runbooks/` — **read it alongside this file.** This file is the public, generic methodology; the runbook is the live record of the current TSC mapping, which evidence slots are filled, and what the compliance platform already automates. It is authoritative for this environment.
 
 ## Scope & guardrails
 
@@ -19,7 +19,7 @@ Pairs with the `soc2-readiness-review` runbook in `local/RoboSystems/runbooks/` 
 
 Run `/security-audit` (or its Phase 1–6 sweep) for the live control state + findings. Then read the code-level and documentary controls:
 - `SECURITY.md` (control catalog) and `robosystems/security/` modules.
-- The written **policy set** and any risk-acceptance register (in the git-ignored design vault `local/RoboSystems/` if present — e.g. `ref/security.md`, `policies/`). Note which of the auditor-expected policies exist vs are missing (infosec, access control, change management, incident response, BCDR, vendor/supplier risk, risk assessment, data classification/retention, encryption/key management, SDLC, HR/acceptable-use).
+- The written **policy set** and any risk-acceptance register (in the private design vault if present — e.g. `ref/security.md`, `policies/`). Note which of the auditor-expected policies exist vs are missing (infosec, access control, change management, incident response, BCDR, vendor/supplier risk, risk assessment, data classification/retention, encryption/key management, SDLC, HR/acceptable-use).
 
 ## Step 2 — Map to the Trust Services Criteria
 

@@ -6,7 +6,7 @@ metadata:
   lane: operate
 ---
 
-The logs are a bug detector only if someone reads them. This skill reads them: pull every ERROR and WARNING over a window, collapse them into distinct messages, set aside the known noise, and trace each remaining signal far enough to say whether it is a bug, a transient, or noise nobody has named yet. Pairs with the `log-review` runbook in `local/RoboSystems/runbooks/`, which holds this environment's **known-noise list**, the signals already accepted or routed, and the last run's findings. Read it first: a review that rediscovers last week's accepted noise wastes the pass.
+The logs are a bug detector only if someone reads them. This skill reads them: pull every ERROR and WARNING over a window, collapse them into distinct messages, set aside the known noise, and trace each remaining signal far enough to say whether it is a bug, a transient, or noise nobody has named yet. Pairs with the `log-review` runbook in the private design vault's `runbooks/`, which holds this environment's **known-noise list**, the signals already accepted or routed, and the last run's findings. Read it first: a review that rediscovers last week's accepted noise wastes the pass.
 
 ## When
 
