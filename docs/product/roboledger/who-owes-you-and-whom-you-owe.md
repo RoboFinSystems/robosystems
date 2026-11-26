@@ -31,7 +31,9 @@ When some open items have no due date of their own, the page says how many and a
 
 **Tie-out to the ledger** sets each company's open items beside the posted balance of its receivables or payables account at the same date. Your receivables account is the one mapped to receivables in your chart of accounts, or QuickBooks' own Accounts Receivable account; your payables account is the one mapped to accounts payable, or QuickBooks' Accounts Payable account. The page names the account it compared with, then shows **Ledger**, **Open items**, and **Ties** when the two agree, or **Difference** and the amount when they don't.
 
-A difference is never plugged. It's whatever moved the account without a document behind it, or a document whose entry hasn't posted: a write-off, a payment that wasn't linked to the invoice it paid, an opening balance, or an entry still waiting for the close. A bank line you've approved this month, for example, settles its invoice right away but posts to the account only when the month closes.
+A difference is never plugged. It's whatever moved the account without a document behind it: a write-off, a payment that wasn't linked to the invoice it paid, or an opening balance.
+
+A payment waiting for the close is not a difference. A bank line you've approved this month settles its invoice right away, but its entry posts to the account only when the month closes. The tie-out counts what the close will post from documents already in the list, so the two still tie before the month is closed.
 
 **No control account mapped** means the company has no account to compare with: no account in its chart is mapped to receivables (or to accounts payable), and it has no QuickBooks Accounts Receivable (or Accounts Payable) account. The open items are still listed. Map the account and the tie-out appears. See [Map your chart of accounts](map-your-chart-of-accounts.md).
 
