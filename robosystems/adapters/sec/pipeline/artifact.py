@@ -56,7 +56,7 @@ def sec_knowledge_artifacts(
   from robosystems.adapters.sec.knowledge.framework import DuckDBAnalyticsContext
   from robosystems.config import env
 
-  is_prod = env.ENVIRONMENT != "dev"
+  is_prod = env.STACK_ENVIRONMENT != "dev"
   _log_memory("asset start")
 
   # The context owns the temp dir holding the downloaded file, so it stays

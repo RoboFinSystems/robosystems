@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from typing import Any
 
-from robosystems.config.env import EnvConfig
+from robosystems.config.env import EnvConfig, stack_environment
 
 
 class StructuredFormatter(logging.Formatter):
@@ -109,7 +109,7 @@ def get_logging_config(environment: str | None = None) -> dict[str, Any]:
   - test: WARNING level, minimal output for clean test runs
   - dev: DEBUG level, all logs enabled (unless LOG_LEVEL overrides)
   """
-  env = environment or EnvConfig.ENVIRONMENT
+  env = environment or stack_environment(EnvConfig.ENVIRONMENT)
 
   log_level_override = getattr(EnvConfig, "LOG_LEVEL", None)
 

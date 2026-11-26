@@ -19,6 +19,7 @@ class TestSecProcessingSensor:
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
 
     context = build_sensor_context()
     result = list(sec_processing_sensor(context))
@@ -32,6 +33,7 @@ class TestSecProcessingSensor:
   def test_skips_when_no_pending_files(self, mock_env, mock_session_factory):
     """Test sensor skips when no pending files exist."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock session with no pending files
     mock_session = MagicMock()
@@ -56,6 +58,7 @@ class TestSecProcessingSensor:
     from dagster import DagsterInstance
 
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Create mock partition_key results for different quarters
     mock_pending_files = [
@@ -99,6 +102,7 @@ class TestSecProcessingSensor:
   def test_shows_error_count_when_no_pending(self, mock_env, mock_session_factory):
     """Test sensor shows error count when no pending files but errors exist."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock session with no pending but some errors
     mock_session = MagicMock()
@@ -121,6 +125,7 @@ class TestSecProcessingSensor:
   def test_handles_database_error(self, mock_env, mock_session_factory):
     """Test sensor handles database errors gracefully."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock session that raises an error
     mock_session_factory.side_effect = Exception("Database connection failed")
@@ -139,6 +144,7 @@ class TestSecProcessingSensor:
     from dagster import DagsterInstance
 
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mix of valid and invalid partition keys
     mock_pending_files = [
@@ -175,6 +181,7 @@ class TestSecProcessingSensor:
     from dagster import DagsterInstance
 
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Many files all from the same quarter
     mock_pending_files = [

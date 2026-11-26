@@ -87,7 +87,7 @@ class TestSubgraphService:
       ) as get_client,
       patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.GRAPH_API_URL = "http://graph-api:8001"
 
       result = await service.create_subgraph_database(
@@ -127,7 +127,7 @@ class TestSubgraphService:
       ) as get_client,
       patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.GRAPH_API_URL = "http://localhost:8001"
 
       await service.create_subgraph_database(
@@ -743,7 +743,7 @@ class TestSubgraphService:
     ):
       mock_env.SEMANTIC_SEARCH_ENABLED = False
       mock_env.GRAPH_API_URL = "http://localhost:8001"
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
 
       result = await service.delete_subgraph_database(
         "kg5f2e5e0da65d45d69645_analysis", force=True

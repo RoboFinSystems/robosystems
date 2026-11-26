@@ -3,8 +3,10 @@ Description: RoboSystems Serve - The Platform on One EC2 Instance
 # The shape in docs/technical/Self-Hosting-on-a-Server.md, launched by one
 # stack (`just serve`). Unlike every other template here it is not part of the
 # platform's own deployment and no workflow deploys it: it runs the compose
-# stack on the published images, in whichever account launches it. It runs the
-# development environment profile (ENVIRONMENT=dev), so:
+# stack on the published images, in whichever account launches it. It runs
+# ENVIRONMENT=selfhost: the development stack's infrastructure held to the
+# deployed posture (secure cookies, HSTS, required secrets). The stack itself
+# is still the development one, so:
 #   - Port 443 is open to AllowedCidr, one address, only. The object store's keys are the same
 #     on every installation and registration is open until the operator closes
 #     it, so the stack must not face the internet as it stands.
@@ -378,6 +380,16 @@ Resources:
             if jq -e 'has("ANTHROPIC_API_KEY")' <<<"$SETTINGS" >/dev/null; then
               sed -i -E 's/^(AWS_BEDROCK_(ACCESS_KEY_ID|SECRET_ACCESS_KEY)=your-)/# \1/' .env
             fi
+            # selfhost requires a credentials key. A stack that ran as dev
+            # derived it from the JWT secret, so pin that derivation: the
+            # connections it already stored still decrypt.
+            if grep -qE '^ENVIRONMENT=selfhost$' .env \
+              && ! grep -qE '^CONNECTION_CREDENTIALS_KEY=.' .env; then
+              JWT=$(grep -E '^JWT_SECRET_KEY=' .env | cut -d= -f2- \
+                | sed -E -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'\$/\1/")
+              set_env CONNECTION_CREDENTIALS_KEY "$(printf '%s_connection_encryption' "$JWT" \
+                | openssl dgst -sha256 -binary | base64 | tr '+/' '-_')"
+            fi
             echo "applied $(jq -r 'keys | length' <<<"$SETTINGS") setting(s)"
             if [ "$#" -gt 0 ] && [ "$1" = "--no-restart" ]; then
               exit 0
@@ -403,7 +415,9 @@ Resources:
               set_env INTUIT_REDIRECT_URI "https://ledger.$DOMAIN/connections/qb-callback"
               # No SEC pipeline runs here, so the filing catalog is the hosted one.
               set_env FILINGS_CDN_URL https://public.robosystems.ai
+              set_env ENVIRONMENT selfhost
               set_env JWT_SECRET_KEY "$(openssl rand -hex 32)"
+              set_env CONNECTION_CREDENTIALS_KEY "$(openssl rand -base64 32 | tr '+/' '-_')"
               set_env ADMIN_API_KEY "$(openssl rand -hex 32)"
               set_env POSTGRES_PASSWORD "$(openssl rand -hex 24)"
               set_env VALKEY_AUTH_TOKEN "$(openssl rand -hex 24)"

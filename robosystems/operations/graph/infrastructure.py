@@ -117,7 +117,7 @@ class InstanceMonitor:
     volume_registry_table: str | None = None,
     environment: str | None = None,
   ):
-    self.environment = environment or env.ENVIRONMENT
+    self.environment = environment or env.STACK_ENVIRONMENT
 
     self.instance_registry_table = (
       instance_registry_table

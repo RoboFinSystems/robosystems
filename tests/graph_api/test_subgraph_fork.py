@@ -45,7 +45,7 @@ async def test_fork_parent_data():
     patch("robosystems.graph_api.client.GraphClient") as mock_client_class,
     patch("robosystems.operations.graph.subgraph_service.env") as mock_env,
   ):
-    mock_env.is_development.return_value = True
+    mock_env.is_single_node.return_value = True
     mock_env.GRAPH_API_URL = "http://localhost:8001"
     mock_client = AsyncMock()
     mock_client_class.return_value = mock_client

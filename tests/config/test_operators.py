@@ -202,8 +202,13 @@ class TestAnthropicAPI:
 
   @pytest.mark.parametrize("environment", ["staging", "prod"])
   def test_a_hosted_environment_refuses_it(self, environment):
-    with pytest.raises(ValueError, match="local development only"):
+    with pytest.raises(ValueError, match="development and self-hosted stacks"):
       anthropic_api_models(True, "sk-test", environment)
+
+  def test_a_self_hosted_stack_runs_on_its_own_key(self):
+    registry = anthropic_api_models(True, "sk-test", "selfhost")
+
+    assert registry[OperatorModel.SONNET_5_5].provider is ModelProvider.ANTHROPIC
 
   def test_on_without_a_key_fails_the_boot(self):
     with pytest.raises(ValueError, match="ANTHROPIC_API_KEY is empty"):

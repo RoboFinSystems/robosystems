@@ -360,7 +360,7 @@ def build_graph_job_config(
 
   # In-process execution avoids per-op subprocess spawn, which dominates
   # runtime locally when a job stages many small files.
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     run_config["execution"] = {"config": {"in_process": {}}}
 
   return run_config

@@ -49,13 +49,14 @@ class ConnectionCredentials(Model):
   def _get_encryption_key() -> bytes:
     """The Fernet key for credential encryption.
 
-    ``CONNECTION_CREDENTIALS_KEY`` is required in prod/staging. Dev/test may
-    fall back to a weak, unsalted derivation from ``JWT_SECRET_KEY``.
+    ``CONNECTION_CREDENTIALS_KEY`` is required when deployed (prod, staging,
+    selfhost). Dev/test may fall back to a weak, unsalted derivation from
+    ``JWT_SECRET_KEY``.
     """
     key = env.CONNECTION_CREDENTIALS_KEY
     if not key:
       # Defense in depth: startup validation also requires the key there.
-      if env.ENVIRONMENT in ("prod", "staging"):
+      if env.is_deployed():
         raise ValueError(
           f"CONNECTION_CREDENTIALS_KEY must be set in {env.ENVIRONMENT}; "
           "refusing to derive a credential key from JWT_SECRET_KEY."

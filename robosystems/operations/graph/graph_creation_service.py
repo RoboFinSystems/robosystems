@@ -231,7 +231,7 @@ class GraphCreationService:
     graph_id: str,
     config: GraphCreationConfig,
   ) -> DatabaseLocation:
-    manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+    manager = LadybugAllocationManager(environment=env.STACK_ENVIRONMENT)
     location = await manager.allocate_database(
       entity_id=config.user_id,
       graph_id=graph_id,
@@ -563,7 +563,7 @@ class GraphCreationService:
         if row is not None:
           from .deprovision_service import GraphDeprovisionService
 
-          service = GraphDeprovisionService(environment=env.ENVIRONMENT)
+          service = GraphDeprovisionService(environment=env.STACK_ENVIRONMENT)
           result = await service.deprovision_graph(
             graph_id=graph_id,
             session=db,
@@ -598,7 +598,7 @@ class GraphCreationService:
             f"(reclaim reconciliation will catch it): {e}"
           )
 
-        manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+        manager = LadybugAllocationManager(environment=env.STACK_ENVIRONMENT)
         await manager.deallocate_database(graph_id)
         logger.info(f"Deallocated {graph_id}")
     except Exception as e:

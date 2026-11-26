@@ -38,7 +38,7 @@ from .master_parking import MasterWakeTimeout, sleep_master, wake_master
   metadata={"stage": "master_wake"},
 )
 def shared_master_awake(context: AssetExecutionContext) -> MaterializeResult:
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping master wake in dev environment")
     return MaterializeResult(metadata={"status": "skipped"})
 
@@ -63,7 +63,7 @@ def shared_master_awake(context: AssetExecutionContext) -> MaterializeResult:
   metadata={"stage": "master_sleep"},
 )
 def shared_master_asleep(context: AssetExecutionContext) -> MaterializeResult:
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping master sleep in dev environment")
     return MaterializeResult(
       metadata={"status": "skipped", "reason": "dev_environment"}

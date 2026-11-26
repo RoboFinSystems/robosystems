@@ -90,6 +90,73 @@ def test_environment_checks(monkeypatch, value, method, expected):
   assert method.__get__(EnvConfig, EnvConfig)() is expected
 
 
+# selfhost: the dev stack's infrastructure, the deployed posture.
+@pytest.mark.parametrize(
+  "value,development,single_node,deployed,aws,stack",
+  [
+    ("dev", True, True, False, False, "dev"),
+    ("local", True, True, False, False, "local"),
+    ("selfhost", False, True, True, False, "dev"),
+    ("staging", False, False, True, True, "staging"),
+    ("prod", False, False, True, True, "prod"),
+    ("test", False, False, False, False, "test"),
+  ],
+)
+def test_environment_axes(
+  monkeypatch, value, development, single_node, deployed, aws, stack
+):
+  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", value)
+
+  assert EnvConfig.is_development() is development
+  assert EnvConfig.is_single_node() is single_node
+  assert EnvConfig.is_deployed() is deployed
+  assert EnvConfig.is_aws_environment() is aws
+  assert EnvConfig.is_selfhost() is (value == "selfhost")
+  assert stack == env.STACK_ENVIRONMENT
+
+
+def test_selfhost_cors_and_passkeys_follow_the_app_urls(monkeypatch):
+  monkeypatch.setattr(EnvConfig, "ENVIRONMENT", "selfhost")
+  monkeypatch.setattr(EnvConfig, "ROBOSYSTEMS_URL", "https://app.serve.example.com")
+  monkeypatch.setattr(EnvConfig, "ROBOLEDGER_URL", "https://ledger.serve.example.com")
+  monkeypatch.setattr(EnvConfig, "PASSKEY_RP_ID", "")
+  monkeypatch.setattr(EnvConfig, "PASSKEY_ORIGIN", "")
+
+  origins = EnvConfig.get_main_cors_origins()
+
+  assert {
+    "https://app.serve.example.com",
+    "https://ledger.serve.example.com",
+  } <= set(origins)
+  assert not any(origin.startswith("http://localhost") for origin in origins)
+  assert EnvConfig.get_passkey_rp_id() == "app.serve.example.com"
+  assert EnvConfig.get_passkey_origin() == "https://app.serve.example.com"
+  assert EnvConfig.get_lbug_cors_origins() == []
+
+
+def test_no_literal_dev_comparison_outside_env():
+  """``env.ENVIRONMENT == "dev"`` is false on a self-hosted stack, which runs
+  the dev infrastructure; such a check asks ``STACK_ENVIRONMENT`` or a
+  predicate instead (robosystems/config/README.md)."""
+  import re
+  from pathlib import Path
+
+  root = Path(__file__).resolve().parents[2]
+  pattern = re.compile(
+    r"""\bENVIRONMENT\b(\.lower\(\))?\s*(==|!=|(not\s+)?in)\s*[\[(]?[^\n]*["']dev["']"""
+  )
+  offenders = []
+  for path in [root / "main.py", *(root / "robosystems").rglob("*.py")]:
+    if path.name == "env.py" and path.parent.name == "config":
+      continue
+    for number, line in enumerate(path.read_text().splitlines(), 1):
+      if "STACK_ENVIRONMENT" in line or "os.getenv" in line:
+        continue
+      if pattern.search(line):
+        offenders.append(f"{path.relative_to(root)}:{number}: {line.strip()}")
+  assert not offenders, "\n".join(offenders)
+
+
 @pytest.mark.parametrize(
   "value,expected",
   [

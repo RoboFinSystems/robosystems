@@ -16,6 +16,20 @@ if env.is_production():
 
 `env` also exposes `is_development()`, `is_staging()`, and `is_test()`.
 
+**`ENVIRONMENT` answers two questions; ask the one you mean.** `selfhost` (the compose stack run for real, as RoboSystems Serve or on a machine someone owns) shares the dev stack's infrastructure and the deployed posture, so the two no longer coincide:
+
+| Question | Ask | True for |
+| -------- | --- | -------- |
+| Which infrastructure: the compose stack or the AWS fleet? | `env.is_single_node()`, or compare `env.STACK_ENVIRONMENT` (`dev` on every single-node stack) | dev, selfhost |
+| Pass an environment to resource names, registry tables, allocation managers | `env.STACK_ENVIRONMENT` | — |
+| Strict posture: required secrets, secure cookies, HSTS, fail closed | `env.is_deployed()` | prod, staging, selfhost |
+| Development shortcuts: GraphiQL, echoed errors, private-network CORS | `env.is_development()` | dev |
+| AWS services: SSM, Secrets Manager, CloudWatch | `env.is_aws_environment()` | prod, staging |
+
+The Graph API process is held only to its own settings, and only on prod and staging: on a single-node stack it is internal to the box.
+
+A new `env.ENVIRONMENT == "dev"` is almost always one of the first two rows, and on a self-hosted stack it reads false.
+
 **Never hardcode a Valkey database number.** Databases are allocated in `valkey_registry.py` and referenced by enum member:
 
 ```python

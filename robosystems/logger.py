@@ -31,7 +31,7 @@ setup_logging()
 
 logger = get_logger("robosystems")
 
-if env.is_development():
+if env.is_single_node():
   logging.getLogger("opentelemetry").setLevel(logging.WARNING)
   logging.getLogger("opentelemetry.sdk").setLevel(logging.WARNING)
   logging.getLogger("opentelemetry.exporter").setLevel(logging.WARNING)

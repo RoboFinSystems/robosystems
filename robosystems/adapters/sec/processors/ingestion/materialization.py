@@ -107,7 +107,7 @@ class LadybugMaterializer:
           repository_name=self.graph_id,
           created_by="system",
           instance_id="local-dev"
-          if env.ENVIRONMENT == "dev"
+          if env.STACK_ENVIRONMENT == "dev"
           else "ladybug-shared-prod",
         )
         logger.info(f"Repository ensure result: {repo_result.get('status', 'unknown')}")

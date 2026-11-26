@@ -383,6 +383,7 @@ class TestGraphClientFactoryCacheKey:
     """Cache key includes env prefix, type, and identifier."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       key = GraphClientFactory._get_cache_key("location", "kg123")
     assert key == "graph:prod:location:kg123"
 
@@ -390,13 +391,15 @@ class TestGraphClientFactoryCacheKey:
     """Cache key without identifier omits trailing component."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
       mock_env.ENVIRONMENT = "staging"
+      mock_env.STACK_ENVIRONMENT = "staging"
       key = GraphClientFactory._get_cache_key("master")
     assert key == "graph:staging:master"
 
   def test_cache_key_fallback_env(self):
-    """Falls back to 'dev' when ENVIRONMENT is None."""
+    """Falls back to 'dev' when no environment is set."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
       mock_env.ENVIRONMENT = None
+      mock_env.STACK_ENVIRONMENT = None
       key = GraphClientFactory._get_cache_key("alb", "sec")
     assert key == "graph:dev:alb:sec"
 
@@ -464,11 +467,12 @@ class TestCreateSharedRepositoryClient:
   async def test_dev_routes_to_local_graph(self):
     """In dev, shared repos route to local graph instance."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.is_test.return_value = False
       mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "dev-key"
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
 
       with patch(f"{FACTORY_MODULE}.GraphClient") as MockClient:
         mock_client = MagicMock()
@@ -486,10 +490,11 @@ class TestCreateSharedRepositoryClient:
   async def test_prod_write_routes_to_master(self):
     """In prod, writes always go to shared master."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.is_test.return_value = False
       mock_env.GRAPH_API_KEY = "prod-key"
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
 
       with (
         patch.object(
@@ -513,10 +518,11 @@ class TestCreateSharedRepositoryClient:
   async def test_prod_read_uses_determine_read_target(self):
     """In prod, reads go through _determine_read_target."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.is_test.return_value = False
       mock_env.GRAPH_API_KEY = "prod-key"
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
 
       with (
         patch.object(
@@ -544,10 +550,11 @@ class TestCreateSharedRepositoryClient:
   async def test_raises_configuration_error_when_no_url_in_prod(self):
     """Raises ConfigurationError when _determine_read_target returns empty URL."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.is_test.return_value = False
       mock_env.GRAPH_API_KEY = "test-key"
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
 
       with patch.object(
         GraphClientFactory,
@@ -561,10 +568,11 @@ class TestCreateSharedRepositoryClient:
   async def test_warns_when_no_api_key_in_prod(self):
     """Warns when no API key in production but still creates client."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.is_test.return_value = False
       mock_env.GRAPH_API_KEY = None
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
 
       with (
         patch.object(
@@ -607,6 +615,7 @@ class TestCreateClient:
       ) as mock_create,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_client = MagicMock()
       mock_create.return_value = mock_client
 
@@ -632,6 +641,7 @@ class TestCreateClient:
       ) as mock_create,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_client = MagicMock()
       mock_create.return_value = mock_client
 
@@ -653,6 +663,7 @@ class TestCreateClient:
       ) as mock_create,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_client = MagicMock()
       mock_create.return_value = mock_client
 
@@ -674,6 +685,7 @@ class TestCreateClient:
       ),
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
 
       with pytest.raises(ServiceUnavailableError, match="kg123456"):
         await GraphClientFactory.create_client("kg123456", "read")
@@ -692,7 +704,7 @@ class TestCreateUserGraphClient:
   async def test_dev_routes_to_local(self):
     """In dev, user graphs route to local graph instance."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "dev-key"
 
@@ -720,7 +732,7 @@ class TestCreateUserGraphClient:
     mock_subgraph_info.database_name = "kg123_dev"
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "dev-key"
 
@@ -743,8 +755,9 @@ class TestCreateUserGraphClient:
   async def test_prod_raises_route_error_when_no_location(self):
     """In prod, RouteError when allocation manager returns None."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
       mock_env.GRAPH_REDIS_CACHE_ENABLED = False
 
@@ -767,8 +780,9 @@ class TestCreateUserGraphClient:
     mock_subgraph_info.database_name = "kg123_dev"
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
       mock_env.GRAPH_REDIS_CACHE_ENABLED = False
 
@@ -821,8 +835,9 @@ class TestUserGraphLocationCache:
     mock_location.instance_id = "i-roundtrip"
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
 
       with (
@@ -861,8 +876,9 @@ class TestUserGraphLocationCache:
     mock_location.instance_id = "i-fresh"
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
 
       with (
@@ -904,8 +920,9 @@ class TestUserGraphLocationCache:
     )
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
 
       with (
@@ -961,8 +978,9 @@ class TestUserGraphLocationCache:
     mock_redis.get.return_value = json.dumps(cached)
 
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.GRAPH_API_KEY = "prod-key"
 
       with (
@@ -1047,7 +1065,7 @@ class TestConvenienceFunctions:
   async def test_get_graph_client_for_sec_ingestion_dev(self):
     """SEC ingestion in dev routes to local graph."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
       mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "dev-key"
 
@@ -1067,7 +1085,7 @@ class TestConvenienceFunctions:
   async def test_get_graph_client_for_sec_ingestion_prod(self):
     """SEC ingestion in prod discovers shared master."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.GRAPH_API_KEY = "prod-key"
 
       with (
@@ -1091,7 +1109,7 @@ class TestConvenienceFunctions:
   async def test_sec_ingestion_prod_never_falls_back_to_graph_api_url(self):
     """GRAPH_API_URL defaults to localhost, so prod must not write there."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.GRAPH_API_URL = "http://localhost:8001"
       mock_env.GRAPH_API_KEY = "key"
 
@@ -1110,7 +1128,7 @@ class TestConvenienceFunctions:
   @pytest.mark.asyncio
   async def test_open_master_breaker_does_not_fall_back_outside_dev(self):
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.GRAPH_CIRCUIT_BREAKERS_ENABLED = True
       mock_env.GRAPH_API_URL = "http://localhost:8001"
 
@@ -1126,7 +1144,7 @@ class TestConvenienceFunctions:
   async def test_sec_ingestion_prod_raises_when_no_fallback(self):
     """SEC ingestion raises when no master and no fallback URL."""
     with patch(f"{FACTORY_MODULE}.env") as mock_env:
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
       mock_env.GRAPH_API_URL = None
       mock_env.GRAPH_API_KEY = "key"
 

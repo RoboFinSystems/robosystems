@@ -19,7 +19,7 @@ async def tier_capacity_status(tier: str) -> str:
     )
     from robosystems.middleware.graph.types import GraphTier
 
-    manager = LadybugAllocationManager(environment=env.ENVIRONMENT)
+    manager = LadybugAllocationManager(environment=env.STACK_ENVIRONMENT)
     status_value = await manager.check_tier_capacity(GraphTier(tier))
   except Exception as e:
     logger.warning(f"Could not determine capacity for tier {tier}: {e}")

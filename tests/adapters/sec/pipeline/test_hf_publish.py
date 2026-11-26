@@ -49,6 +49,7 @@ def _lfs(filename, file_oid):
 def prod_env():
   with patch(f"{HELPER}.env") as env:
     env.ENVIRONMENT = "prod"
+    env.STACK_ENVIRONMENT = "prod"
     env.HF_TOKEN = "hf_test_token"
     env.get_r2_config.return_value = {
       "endpoint_url": "https://r2.example",
@@ -144,6 +145,7 @@ class TestPublishToHuggingface:
   def test_skips_in_dev(self):
     with patch(f"{HELPER}.env") as env:
       env.ENVIRONMENT = "dev"
+      env.STACK_ENVIRONMENT = "dev"
       result = publish_to_huggingface(
         build_asset_context(), graph_id="sec", repo_id=REPO, path_in_repo=PATH
       )

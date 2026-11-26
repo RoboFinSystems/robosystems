@@ -4,6 +4,14 @@ import logging
 import os
 from typing import Any
 
+from robosystems.config.env import (
+  DEVELOPMENT_ENVIRONMENTS,
+  SELFHOST_ENVIRONMENTS,
+  stack_environment,
+)
+
+_UNDEPLOYED_ENVIRONMENTS = DEVELOPMENT_ENVIRONMENTS | {"test", "testing"}
+
 logger = logging.getLogger(__name__)
 
 
@@ -62,7 +70,14 @@ class EnvValidator:
       EnvValidator._report(errors, warnings)
       return
 
-    if env_config.ENVIRONMENT in ("prod", "staging"):
+    environment = env_config.ENVIRONMENT
+    # Held to the deployed posture: prod, staging, selfhost, and any value not
+    # known to be development, so a mistyped ENVIRONMENT fails closed.
+    deployed = environment.lower() not in _UNDEPLOYED_ENVIRONMENTS
+    # Flags come from SSM everywhere deployed except a self-hosted stack.
+    on_aws = deployed and environment.lower() not in SELFHOST_ENVIRONMENTS
+
+    if deployed:
       required_prod_vars = {
         "DATABASE_URL": "PostgreSQL connection string",
         "JWT_SECRET_KEY": "JWT signing key (must not be default)",
@@ -78,7 +93,13 @@ class EnvValidator:
             f"{var_name}: {description} is required in {env_config.ENVIRONMENT}"
           )
         elif var_name == "JWT_SECRET_KEY":
-          if "development" in str(value).lower() or "dev-jwt" in str(value).lower():
+          lowered = str(value).lower()
+          # .env.example's placeholder is public, so it signs forgeable tokens.
+          if (
+            "development" in lowered
+            or "dev-jwt" in lowered
+            or lowered.startswith("your-")
+          ):
             errors.append(
               f"{var_name}: Must not use the development default in "
               f"{env_config.ENVIRONMENT}"
@@ -86,7 +107,7 @@ class EnvValidator:
           elif len(str(value)) < 32:
             errors.append(f"{var_name}: Must be at least 32 characters for security")
 
-    if env_config.ENVIRONMENT in ("prod", "staging"):
+    if deployed:
       # A seeded placeholder is a public HMAC key; refuse it whether or not
       # billing is on, so an unconfigured webhook secret never verifies.
       webhook_secret = str(getattr(env_config, "STRIPE_WEBHOOK_SECRET", "") or "")
@@ -132,7 +153,7 @@ class EnvValidator:
       feature_vars["PLAID_CLIENT_ID"] = "Plaid bank feed"
       feature_vars["PLAID_SECRET"] = "Plaid bank feed"
 
-    if env_config.ENVIRONMENT in ["dev", "local"]:
+    if stack_environment(environment) in ("dev", "local"):
       feature_vars["GRAPH_API_URL"] = "Graph API endpoint (local development)"
 
     for var_name, feature in feature_vars.items():
@@ -140,18 +161,15 @@ class EnvValidator:
       if not value:
         warnings.append(f"{var_name}: Not configured - {feature} will not be available")
 
-    if (
-      not getattr(env_config, "GRAPH_API_KEY", None)
-      and env_config.ENVIRONMENT != "dev"
-      and env_config.ENVIRONMENT != "local"
-    ):
+    if not getattr(env_config, "GRAPH_API_KEY", None) and stack_environment(
+      environment
+    ) not in ("dev", "local"):
       warnings.append(
         "GRAPH_API_KEY: Not configured - "
         "Graph database operations will fail without proper authentication."
       )
 
     # Fail at boot rather than as a confusing error at first login.
-    deployed = env_config.ENVIRONMENT not in ("dev", "local", "test")
     if getattr(env_config, "SSO_OIDC_ENABLED", False):
       for var_name in (
         "SSO_OIDC_ISSUER",
@@ -225,7 +243,7 @@ class EnvValidator:
 
     # Flags resolve once at import, so a deployed boot that could not read SSM
     # would serve its whole life on permissive code defaults. Refuse to boot.
-    if deployed:
+    if on_aws:
       if not getattr(env_config, "PARAMETER_STORE_AVAILABLE", False):
         errors.append(
           "PARAMETER_STORE_AVAILABLE is False in a deployed environment — SSM "

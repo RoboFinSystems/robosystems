@@ -64,7 +64,7 @@ class GraphCreationTask(BaseTask):
         )
 
         with platform_session() as db:
-          deprovision = GraphDeprovisionService(environment=env.ENVIRONMENT)
+          deprovision = GraphDeprovisionService(environment=env.STACK_ENVIRONMENT)
           deprovision_result = await deprovision.deprovision_graph(
             graph_id=result.graph_id,
             session=db,

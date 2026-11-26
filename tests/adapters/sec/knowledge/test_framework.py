@@ -87,7 +87,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       ctx = DuckDBAnalyticsContext(duckdb_source="sec")
       result = ctx.__enter__()
@@ -110,7 +110,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       ctx = DuckDBAnalyticsContext(duckdb_source="sec")
       ctx.__enter__()
@@ -129,7 +129,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(missing_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       ctx = DuckDBAnalyticsContext(duckdb_source="sec")
       with pytest.raises(FileNotFoundError, match="not found"):
@@ -148,7 +148,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         assert ctx._output_dir is not None
@@ -171,7 +171,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec", local_dir=str(local_dir)) as ctx:
         assert ctx._output_dir == local_dir / "output"
@@ -189,7 +189,7 @@ class TestDuckDBAnalyticsContextManagerDev:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec", threads=2) as ctx:
         # Verify connection is valid and threads were set
@@ -216,7 +216,7 @@ class TestDuckDBAnalyticsContextQuery:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         result = ctx.query("SELECT SUM(val) AS total FROM numbers")
@@ -248,7 +248,7 @@ class TestDuckDBAnalyticsContextWriteParquet:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         relation = ctx.query("SELECT * FROM data")
@@ -273,7 +273,7 @@ class TestDuckDBAnalyticsContextWriteParquet:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         relation = ctx.query("SELECT * FROM data")
@@ -295,7 +295,7 @@ class TestDuckDBAnalyticsContextWriteParquet:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         relation = ctx.query("SELECT * FROM data")
@@ -327,7 +327,7 @@ class TestDuckDBAnalyticsContextUploadOutputs:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         relation = ctx.query("SELECT * FROM data")
@@ -353,7 +353,7 @@ class TestDuckDBAnalyticsContextUploadOutputs:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         results = ctx.upload_outputs("test_analysis")
@@ -375,7 +375,7 @@ class TestDuckDBAnalyticsContextProd:
       patch("robosystems.adapters.sec.knowledge.framework.env") as mock_env,
       patch.object(DuckDBAnalyticsContext, "_download_from_s3") as mock_download,
     ):
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
 
       # Create a fake DB at the download destination
       def fake_download(dest_path):
@@ -401,7 +401,7 @@ class TestDuckDBAnalyticsContextProd:
       patch("robosystems.adapters.sec.knowledge.framework.env") as mock_env,
       patch.object(DuckDBAnalyticsContext, "_download_from_s3") as mock_download,
     ):
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
 
       tmpdir_name = None
 
@@ -452,7 +452,7 @@ class TestDuckDBAnalyticsContextProd:
         patch("robosystems.adapters.sec.knowledge.framework.env") as mock_env,
         patch.object(DuckDBAnalyticsContext, "_download_from_s3") as mock_download,
       ):
-        mock_env.is_development.return_value = False
+        mock_env.is_single_node.return_value = False
         mock_env.SHARED_PROCESSED_BUCKET = "test-bucket"
         mock_env.AWS_REGION = "us-east-1"
 
@@ -499,7 +499,7 @@ class TestDuckDBAnalyticsContextEdgeCases:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec") as ctx:
         assert ctx._conn is not None
@@ -527,7 +527,7 @@ class TestDuckDBAnalyticsContextEdgeCases:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       ctx = DuckDBAnalyticsContext(duckdb_source="sec")
       ctx.__enter__()
@@ -552,7 +552,7 @@ class TestDuckDBAnalyticsContextEdgeCases:
         return_value=str(db_path),
       ),
     ):
-      mock_env.is_development.return_value = True
+      mock_env.is_single_node.return_value = True
 
       with DuckDBAnalyticsContext(duckdb_source="sec", memory_limit="512MB") as ctx:
         result = ctx.conn.execute("SELECT current_setting('memory_limit')").fetchone()

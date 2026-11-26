@@ -30,6 +30,7 @@ def _make_ai_client():
     patch("boto3.client", return_value=mock_bedrock_client),
   ):
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
     mock_env.AWS_BEDROCK_REGION = "us-east-1"
     mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
     mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"
@@ -157,6 +158,7 @@ class TestAIClientInitialization:
       patch("boto3.client", return_value=mock_client) as mock_boto3_client,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_env.AWS_BEDROCK_REGION = "us-east-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test-access-key"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test-secret-key"
@@ -186,6 +188,7 @@ class TestAIClientInitialization:
       patch("boto3.client", return_value=mock_client) as mock_boto3_client,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_env.AWS_BEDROCK_REGION = "us-west-2"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
@@ -221,6 +224,7 @@ class TestAIClientInitialization:
       patch("boto3.client", side_effect=side_effect),
     ):
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.AWS_BEDROCK_REGION = "us-east-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
@@ -242,6 +246,7 @@ class TestAIClientInitialization:
       patch("boto3.client", side_effect=Exception("Invalid credentials")),
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_env.AWS_BEDROCK_REGION = "us-east-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "bad-key"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "bad-secret"
@@ -270,6 +275,7 @@ class TestAIClientInitialization:
       patch("boto3.client", side_effect=side_effect),
     ):
       mock_env.ENVIRONMENT = "prod"
+      mock_env.STACK_ENVIRONMENT = "prod"
       mock_env.AWS_BEDROCK_REGION = "us-east-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = ""
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = ""
@@ -834,6 +840,7 @@ class TestAIClientBedrockEndpoint:
       patch("boto3.client", return_value=mock_client) as mock_boto3_client,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_env.AWS_BEDROCK_REGION = "eu-west-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"
@@ -858,6 +865,7 @@ class TestAIClientBedrockEndpoint:
       patch("boto3.client", return_value=mock_client) as mock_boto3_client,
     ):
       mock_env.ENVIRONMENT = "dev"
+      mock_env.STACK_ENVIRONMENT = "dev"
       mock_env.AWS_BEDROCK_REGION = "ap-southeast-1"
       mock_env.AWS_BEDROCK_ACCESS_KEY_ID = "test"
       mock_env.AWS_BEDROCK_SECRET_ACCESS_KEY = "test"

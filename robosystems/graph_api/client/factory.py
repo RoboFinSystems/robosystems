@@ -205,7 +205,7 @@ class GraphClientFactory:
   @classmethod
   def _get_cache_key(cls, key_type: str, identifier: str = "") -> str:
     """Build a cache key, prefixed by environment so envs never share entries."""
-    env_prefix = env.ENVIRONMENT or "dev"
+    env_prefix = env.STACK_ENVIRONMENT or "dev"
     if identifier:
       return f"graph:{env_prefix}:{key_type}:{identifier}"
     return f"graph:{env_prefix}:{key_type}"
@@ -294,7 +294,7 @@ class GraphClientFactory:
     ``RouteError`` when the graph is not allocated to any instance.
     """
     if environment is None:
-      environment = env.ENVIRONMENT or "dev"
+      environment = env.STACK_ENVIRONMENT or "dev"
 
     logger.info(
       f"Creating graph client for graph={graph_id}, "
@@ -338,7 +338,7 @@ class GraphClientFactory:
     and reads prefer the replica ALB, falling back to the master.
     """
 
-    if env.is_development():
+    if env.is_single_node():
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       logger.info(
         f"Dev environment: Routing {graph_id} {operation_type} to LadybugDB at {api_url}"
@@ -361,7 +361,7 @@ class GraphClientFactory:
       raise ConfigurationError(f"No endpoint configured for {target.value}")
 
     if not api_key:
-      if not env.is_development() and not env.is_test():
+      if not env.is_single_node() and not env.is_test():
         logger.warning(f"No API key configured for {target.value}, using default")
       api_key = env.GRAPH_API_KEY
 
@@ -418,7 +418,7 @@ class GraphClientFactory:
     if env.GRAPH_CIRCUIT_BREAKERS_ENABLED:
       if not await cls._master_circuit_breaker.should_attempt():
         logger.warning("Shared master circuit breaker is open, using fallback")
-        if env.is_development() and env.GRAPH_API_URL:
+        if env.is_single_node() and env.GRAPH_API_URL:
           return env.GRAPH_API_URL
         raise ServiceUnavailableError(
           "Shared master unavailable (circuit breaker open)"
@@ -510,7 +510,7 @@ class GraphClientFactory:
 
     # Gated on development: a localhost fallback in prod/staging would send
     # shared-repository writes to whatever happens to answer on port 8001.
-    if env.is_development() and env.GRAPH_API_URL:
+    if env.is_single_node() and env.GRAPH_API_URL:
       logger.warning(
         f"Dev environment: Using API URL fallback for shared master: {env.GRAPH_API_URL}"
       )
@@ -543,7 +543,7 @@ class GraphClientFactory:
         f"database: {database_name}"
       )
 
-    if env.is_development():
+    if env.is_single_node():
       api_url = env.GRAPH_API_URL or "http://localhost:8001"
       api_key = env.GRAPH_API_KEY
 
@@ -586,7 +586,7 @@ class GraphClientFactory:
 
     if private_ip is None:
       allocation_manager = LadybugAllocationManager(
-        environment=environment or env.ENVIRONMENT
+        environment=environment or env.STACK_ENVIRONMENT
       )
       db_location = await allocation_manager.find_database_location(actual_graph_id)
 
@@ -680,7 +680,7 @@ async def get_graph_client_for_sec_ingestion() -> GraphClient:
   """
   logger.info("Creating graph client for SEC ingestion (direct to shared master)")
 
-  if env.is_development():
+  if env.is_single_node():
     api_url = env.GRAPH_API_URL or "http://localhost:8001"
     logger.info(f"Dev environment: SEC ingestion to local graph at {api_url}")
   else:

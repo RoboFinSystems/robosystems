@@ -104,7 +104,7 @@ def sec_processing_sensor(context: SensorEvaluationContext):
   # SourceFile.partition_key is "YYYY-QN_cik_accession".
   quarter_pattern = re.compile(r"^(\d{4}-Q[1-4])_")
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     yield SkipReason("Skipped in dev - use Dagster UI to trigger sec_process manually")
     return
 
@@ -336,7 +336,7 @@ def sec_incremental_pipeline_sensor(context: RunStatusSensorContext):
   from robosystems.database import session as SessionLocal
   from robosystems.models.core import SourceFile
 
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
     return
 
@@ -576,7 +576,7 @@ def sec_current_reports_sensor(context: RunStatusSensorContext):
   pulls run one after the other (the ``edgar`` run-queue limit holds that for
   manual launches too).
   """
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
     return
 
@@ -691,7 +691,7 @@ def sec_current_reports_intraday_schedule(context):
 )
 def sec_wake_to_stage_sensor(context: RunStatusSensorContext):
   """Trigger incremental DuckDB staging once the shared master is awake+healthy."""
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
     return
 
@@ -758,7 +758,7 @@ def sec_stage_to_materialize_sensor(context: RunStatusSensorContext):
   A nightly rebuild erases drift (partial batch failures, stale mutable Entity
   attributes), and the sec graph (2024+) is small enough for it.
   """
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping chain sensor in dev environment")
     return
 
@@ -837,7 +837,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
   Sequential so concurrent uploads don't overload the instance. The lbug copy
   feeds the replica fleet; the duckdb copy feeds the knowledge-artifacts build.
   """
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping publish sensor in dev environment")
     return
 
@@ -930,7 +930,7 @@ def sec_post_materialize_publish_sensor(context: RunStatusSensorContext):
 )
 def sec_master_sleep_on_failure_sensor(context: RunStatusSensorContext):
   """A failed chain step never reaches the terminal sleep, so sleep here."""
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping failure sleep sensor in dev environment")
     return
 
@@ -989,7 +989,7 @@ def sec_post_stage_index_sensor(context: RunStatusSensorContext):
   Runs alongside the materialize branch; the index jobs are idempotent
   (OpenSearch upserts by document_id).
   """
-  if env.ENVIRONMENT == "dev":
+  if env.STACK_ENVIRONMENT == "dev":
     context.log.info("Skipping text index sensor in dev environment")
     return
 

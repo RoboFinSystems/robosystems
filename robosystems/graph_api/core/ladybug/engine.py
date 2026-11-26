@@ -375,7 +375,7 @@ class Repository:
     self.read_only = read_only
 
     if validate_schema is None:
-      self.validate_schema = env.ENVIRONMENT.lower() in ("dev", "test", "staging")
+      self.validate_schema = env.STACK_ENVIRONMENT.lower() in ("dev", "test", "staging")
     else:
       self.validate_schema = validate_schema
 

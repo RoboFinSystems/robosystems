@@ -62,7 +62,7 @@ def build_shared_replicas_refreshed(deps: list[str] | None = None):
     """Trigger and monitor rolling refresh of shared replica fleet."""
     import boto3
 
-    if env.ENVIRONMENT == "dev":
+    if env.STACK_ENVIRONMENT == "dev":
       context.log.info("Skipping replica refresh in dev environment")
       return MaterializeResult(
         metadata={

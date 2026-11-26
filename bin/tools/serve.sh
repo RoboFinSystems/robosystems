@@ -455,6 +455,34 @@ write_settings() {
 # The value goes to the stack's settings secret and the instance reads it from
 # there, so it is never in a command's text or in Systems Manager's history.
 # Given as an argument it is in this machine's shell history; the prompt is not.
+# selfhost requires CONNECTION_CREDENTIALS_KEY. A stack that ran as dev
+# encrypted its connections with a key derived from the JWT secret, so that is
+# the key it pins. It first checks the JWT secret is one selfhost will accept.
+# Plain sh, so it runs on a stack of any age.
+PIN_CREDENTIALS_KEY=$(
+  cat <<'EOF'
+cd /data/robosystems
+# The value as the application reads it: one pair of surrounding quotes off.
+JWT=$(grep -E '^JWT_SECRET_KEY=' .env | cut -d= -f2- | sed -E -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'\$/\1/")
+# selfhost refuses to start on these, so refuse here, before anything changes.
+case "$JWT" in
+'' | your-* | *development* | *dev-jwt*)
+  echo "JWT_SECRET_KEY in .env is empty or a placeholder; selfhost would not start" >&2
+  exit 1
+  ;;
+esac
+[ "${#JWT}" -ge 32 ] || { echo "JWT_SECRET_KEY is shorter than 32 characters; selfhost would not start" >&2; exit 1; }
+if grep -qE '^CONNECTION_CREDENTIALS_KEY=.' .env; then
+  echo "credentials key already set"
+  exit 0
+fi
+KEY=$(printf '%s_connection_encryption' "$JWT" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_')
+sed -i -E '/^#? ?CONNECTION_CREDENTIALS_KEY=/d' .env
+printf 'CONNECTION_CREDENTIALS_KEY=%s\n' "$KEY" >>.env
+echo "credentials key pinned"
+EOF
+)
+
 cmd_set() {
   [ $# -ge 1 ] && [ $# -le 2 ] || die "usage: just serve set <KEY> [value]"
   local key=$1 value secret
@@ -470,6 +498,10 @@ cmd_set() {
   case "$value" in
   *$'\n'* | *$'\r'*) die "a value is one line" ;;
   esac
+  if [ "$key" = ENVIRONMENT ] && [ "$value" = selfhost ]; then
+    echo "Pinning the credentials key the stack has used so far."
+    on_instance 60 "$PIN_CREDENTIALS_KEY"
+  fi
   secret=$(settings_secret)
   write_settings "$secret" '.[$key] = $value' --arg key "$key" --arg value "$value"
   echo "Saved $key; applying it on the instance."

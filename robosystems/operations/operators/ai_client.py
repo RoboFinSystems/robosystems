@@ -163,7 +163,7 @@ class AIClient:
       "endpoint_url": bedrock_endpoint,
     }
 
-    if env.ENVIRONMENT == "dev" and env.AWS_BEDROCK_ACCESS_KEY_ID:
+    if env.STACK_ENVIRONMENT == "dev" and env.AWS_BEDROCK_ACCESS_KEY_ID:
       kwargs["aws_access_key_id"] = env.AWS_BEDROCK_ACCESS_KEY_ID
       kwargs["aws_secret_access_key"] = env.AWS_BEDROCK_SECRET_ACCESS_KEY
       logger.info("Using Bedrock with dev credentials (AWS_BEDROCK_ACCESS_KEY_ID)")
@@ -176,7 +176,7 @@ class AIClient:
       client = long_call_client("bedrock-runtime", _BEDROCK_READ_TIMEOUT, **kwargs)
       # Fail at construction rather than on the first (billable) call. Skipped
       # in dev, which has no AWS identity to check.
-      if env.ENVIRONMENT != "dev":
+      if env.STACK_ENVIRONMENT != "dev":
         sts_kwargs = {"service_name": "sts", "region_name": env.AWS_BEDROCK_REGION}
         if env.AWS_BEDROCK_ACCESS_KEY_ID:
           sts_kwargs["aws_access_key_id"] = env.AWS_BEDROCK_ACCESS_KEY_ID

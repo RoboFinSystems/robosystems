@@ -133,7 +133,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
       ),
     ):
       mock_conn_cls.return_value = MagicMock()
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
 
       result = manager.create_database(request)
       assert result.status == "success"
@@ -165,7 +165,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
     ):
       mock_conn = MagicMock()
       mock_conn_cls.return_value = mock_conn
-      mock_env.is_development.return_value = False
+      mock_env.is_single_node.return_value = False
 
       result = manager.create_database(request)
       assert result.status == "success"
@@ -220,7 +220,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
           return_value=256,
         ),
       ):
-        mock_env.is_development.return_value = False
+        mock_env.is_single_node.return_value = False
 
         manager.create_database(request)
 
@@ -246,7 +246,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
           return_value=256,
         ),
       ):
-        mock_env.is_development.return_value = False
+        mock_env.is_single_node.return_value = False
 
         manager.create_database(request)
 
@@ -294,7 +294,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
           return_value=256,
         ),
       ):
-        mock_env.is_development.return_value = False
+        mock_env.is_single_node.return_value = False
 
         result = manager.create_database(request)
 

@@ -175,7 +175,7 @@ def deprovision_suspended_graphs(
     GraphDeprovisionService,
   )
 
-  service = GraphDeprovisionService(environment=env.ENVIRONMENT)
+  service = GraphDeprovisionService(environment=env.STACK_ENVIRONMENT)
   deprovisioned_count = 0
   errors: list[str] = []
   retention_cutoff = datetime.now(UTC) - timedelta(

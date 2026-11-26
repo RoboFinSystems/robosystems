@@ -90,6 +90,7 @@ class TestSecIncrementalPipelineSensor:
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
 
     context = _build_run_status_context(
       sensor_name="sec_incremental_pipeline_sensor",
@@ -103,6 +104,7 @@ class TestSecIncrementalPipelineSensor:
   def test_skips_non_incremental_runs(self, mock_env):
     """Test sensor skips non-incremental pipeline runs."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_incremental_pipeline_sensor",
@@ -116,6 +118,7 @@ class TestSecIncrementalPipelineSensor:
   def test_skips_when_no_partition_key(self, mock_env):
     """Test sensor skips when no partition key in tags."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_incremental_pipeline_sensor",
@@ -129,6 +132,7 @@ class TestSecIncrementalPipelineSensor:
   def test_download_triggers_process(self, mock_env):
     """Test download success triggers first process batch."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -159,6 +163,7 @@ class TestSecIncrementalPipelineSensor:
   def test_skips_when_process_already_running(self, mock_env):
     """Test sensor skips when process job already running for partition."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -187,6 +192,7 @@ class TestSecIncrementalPipelineSensor:
   def test_process_retriggers_when_pending_remain(self, mock_env, mock_session_factory):
     """Test process success re-triggers another batch when pending files remain."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock SourceFile query returning pending files for the partition
     mock_session = MagicMock()
@@ -234,6 +240,7 @@ class TestSecIncrementalPipelineSensor:
     (shared_master_wake); staging is then chained by sec_wake_to_stage_sensor.
     """
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock SourceFile query returning no pending files
     mock_session = MagicMock()
@@ -277,6 +284,7 @@ class TestSecIncrementalPipelineSensor:
   ):
     """Test sensor waits when this partition is done but others still have pending files."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # This partition (2025-Q1) is drained, but 2024-Q4 still has pending files
     mock_session = MagicMock()
@@ -316,6 +324,7 @@ class TestSecIncrementalPipelineSensor:
   def test_skips_stage_when_stage_already_running(self, mock_env, mock_session_factory):
     """Test sensor skips staging when stage job is already running."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     # Mock no pending files
     mock_session = MagicMock()
@@ -353,6 +362,7 @@ class TestSecIncrementalPipelineSensor:
   def test_handles_database_error(self, mock_env, mock_session_factory):
     """Test sensor handles database errors gracefully on process completion."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     mock_session_factory.side_effect = Exception("DB connection refused")
 
     context = _build_run_status_context(
@@ -378,6 +388,7 @@ class TestSecStageToMaterializeSensor:
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
 
     context = _build_run_status_context(
       sensor_name="sec_stage_to_materialize_sensor",
@@ -392,6 +403,7 @@ class TestSecStageToMaterializeSensor:
   def test_skips_non_incremental_runs(self, mock_env):
     """Test sensor skips non-incremental runs."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_stage_to_materialize_sensor",
@@ -406,6 +418,7 @@ class TestSecStageToMaterializeSensor:
   def test_yields_run_request_after_incremental_stage(self, mock_env):
     """Test sensor yields RunRequest after incremental staging."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -439,6 +452,7 @@ class TestSecStageToMaterializeSensor:
   def test_skips_when_materialize_already_running(self, mock_env):
     """Test sensor skips when materialize job is already running."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -471,6 +485,7 @@ class TestSecPostMaterializePublishSensor:
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
 
     context = _build_run_status_context(
       sensor_name="sec_post_materialize_publish_sensor",
@@ -485,6 +500,7 @@ class TestSecPostMaterializePublishSensor:
   def test_skips_non_incremental_runs(self, mock_env):
     """Test sensor skips non-incremental runs."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_post_materialize_publish_sensor",
@@ -499,6 +515,7 @@ class TestSecPostMaterializePublishSensor:
   def test_materialize_triggers_lbug_publish(self, mock_env):
     """Test materialize success triggers lbug S3 publish."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -523,6 +540,7 @@ class TestSecPostMaterializePublishSensor:
   def test_lbug_publish_triggers_duckdb_publish(self, mock_env):
     """Test lbug publish success triggers duckdb S3 publish."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -547,6 +565,7 @@ class TestSecPostMaterializePublishSensor:
   def test_duckdb_publish_triggers_replica_refresh(self, mock_env):
     """Test duckdb publish success triggers replica refresh."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -574,6 +593,7 @@ class TestSecPostMaterializePublishSensor:
   def test_skips_when_next_job_already_running(self, mock_env):
     """Test sensor skips when next job is already running."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -733,6 +753,7 @@ class TestSecPostStageIndexSensor:
   def test_skips_in_dev_environment(self, mock_env):
     """Test sensor skips in dev environment."""
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
 
     context = _build_run_status_context(
       sensor_name="sec_post_stage_index_sensor",
@@ -747,6 +768,7 @@ class TestSecPostStageIndexSensor:
   def test_skips_non_incremental_runs(self, mock_env):
     """Test sensor skips non-incremental runs."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_post_stage_index_sensor",
@@ -761,6 +783,7 @@ class TestSecPostStageIndexSensor:
   def test_yields_run_requests_for_all_index_jobs(self, mock_env):
     """Test sensor yields RunRequests for narratives, iXBRL, and the filer catalog."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -793,6 +816,7 @@ class TestSecPostStageIndexSensor:
   def test_indexes_the_staged_quarter(self, mock_env):
     """The index/catalog partition is the quarter staged, not today's in UTC."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -813,6 +837,7 @@ class TestSecPostStageIndexSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_untagged_run_falls_back_to_eastern_quarter(self, mock_env, _quarter):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -833,6 +858,7 @@ class TestSecPostStageIndexSensor:
   def test_passes_graph_id_in_config(self, mock_env):
     """Test sensor passes graph_id through run config."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -860,6 +886,7 @@ class TestSecPostStageIndexSensor:
   def test_defaults_graph_id_to_sec(self, mock_env):
     """Test sensor defaults graph_id to 'sec' when not in tags."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -882,6 +909,7 @@ class TestSecPostStageIndexSensor:
   def test_skips_job_when_already_running(self, mock_env):
     """Test sensor skips a job when it's already running."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     from dagster import DagsterInstance
 
@@ -907,6 +935,7 @@ class TestSecPostStageIndexSensor:
   def test_skips_when_no_mode_tag(self, mock_env):
     """Test sensor skips when mode tag is missing entirely."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
 
     context = _build_run_status_context(
       sensor_name="sec_post_stage_index_sensor",
@@ -925,6 +954,7 @@ class TestSecWakeToStageSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_triggers_stage_on_wake_success(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_wake_to_stage_sensor",
       job_name="shared_master_wake",
@@ -941,6 +971,7 @@ class TestSecWakeToStageSensor:
     """Staging after midnight on a quarter's last day must still stage that
     quarter, not re-derive the new one from the clock."""
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_wake_to_stage_sensor",
       job_name="shared_master_wake",
@@ -954,6 +985,7 @@ class TestSecWakeToStageSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_non_incremental(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_wake_to_stage_sensor",
       job_name="shared_master_wake",
@@ -964,6 +996,7 @@ class TestSecWakeToStageSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_stage_already_running(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_wake_to_stage_sensor",
       job_name="shared_master_wake",
@@ -980,6 +1013,7 @@ class TestSecMasterSleepOnFailureSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_sleeps_on_incremental_failure(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_master_sleep_on_failure_sensor",
       job_name="sec_materialize",
@@ -992,6 +1026,7 @@ class TestSecMasterSleepOnFailureSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_non_incremental(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_master_sleep_on_failure_sensor",
       job_name="sec_materialize",
@@ -1002,6 +1037,7 @@ class TestSecMasterSleepOnFailureSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_when_sleep_already_running(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_master_sleep_on_failure_sensor",
       job_name="sec_materialize",
@@ -1018,6 +1054,7 @@ class TestPublishSensorSleepsMaster:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_duckdb_publish_triggers_refresh_and_sleep(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     context = _build_run_status_context(
       sensor_name="sec_post_materialize_publish_sensor",
       job_name="sec_duckdb_s3_publish",
@@ -1103,6 +1140,7 @@ class TestSecCurrentReportsSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_download_triggers_the_capture_with_a_look_back(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     [request] = self._run("sec_download")
     assert request.job_name == "sec_current_reports_capture"
     assert request.partition_key == "2025-Q4"
@@ -1118,11 +1156,13 @@ class TestSecCurrentReportsSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_manual_runs_do_not_chain(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     assert self._run("sec_download", tags={"dagster/partition": "2025-Q4"}) == []
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_while_the_next_job_runs(self, mock_env):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     assert self._run("sec_download", active=[MagicMock()]) == []
 
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
@@ -1130,6 +1170,7 @@ class TestSecCurrentReportsSensor:
     # The intraday capture reads two days back; this is the pass that covers
     # a weekend or a missed night, so it is still asked for.
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     from dagster import DagsterInstance
 
     def get_runs(filters=None, **kwargs):
@@ -1154,6 +1195,7 @@ class TestSecCurrentReportsSensor:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_skips_in_dev(self, mock_env):
     mock_env.ENVIRONMENT = "dev"
+    mock_env.STACK_ENVIRONMENT = "dev"
     assert self._run("sec_download") == []
 
 
@@ -1198,6 +1240,7 @@ class TestIntradayChain:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_a_download_with_new_files_processes_them(self, mock_env, session):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, count=3)
     [request] = self._run("sec_download")
     assert request.job_name == "sec_process"
@@ -1209,6 +1252,7 @@ class TestIntradayChain:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_a_download_with_nothing_new_ends_the_pass(self, mock_env, session):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, count=0)
     assert self._run("sec_download") == []
 
@@ -1218,6 +1262,7 @@ class TestIntradayChain:
     self, mock_env, session
   ):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, raises=RuntimeError("database is away"))
     [request] = self._run("sec_download")
     assert request.job_name == "sec_process"
@@ -1226,6 +1271,7 @@ class TestIntradayChain:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_a_drained_pass_ends_at_the_catalog_not_the_master(self, mock_env, session):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, rows=[])
     [request] = self._run("sec_process")
     assert request.job_name == "sec_catalog"
@@ -1239,6 +1285,7 @@ class TestIntradayChain:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_files_still_pending_get_another_batch(self, mock_env, session):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, rows=[("2026-Q4_0000000001_0000000001-26-000001",)])
     [request] = self._run("sec_process")
     assert request.job_name == "sec_process"
@@ -1248,6 +1295,7 @@ class TestIntradayChain:
   @patch("robosystems.adapters.sec.pipeline.sensors.env")
   def test_a_catalog_already_running_is_not_doubled(self, mock_env, session):
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, rows=[])
     assert self._run("sec_process", get_runs=lambda **kwargs: [MagicMock()]) == []
 
@@ -1260,6 +1308,7 @@ class TestIntradayChain:
     # never start. The nightly download asks for its own run, which the
     # `quarter` run-queue limit holds behind the intraday one.
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, count=0)
 
     def get_runs(filters=None, **kwargs):
@@ -1285,6 +1334,7 @@ class TestIntradayChain:
     # on the nightly quarter or (across a quarter's end) on the one where the
     # files are pending; waiting on it would wait for a wake that never comes.
     mock_env.ENVIRONMENT = "prod"
+    mock_env.STACK_ENVIRONMENT = "prod"
     _pending(session, rows=[("2026-Q3_0000000001_0000000001-26-000001",)])
     intraday = MagicMock()
     intraday.run_id = "run-intraday-live"
