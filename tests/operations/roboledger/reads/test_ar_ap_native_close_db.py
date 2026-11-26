@@ -10,7 +10,10 @@ from unittest.mock import MagicMock, patch
 import pytest
 from sqlalchemy import select
 
-from robosystems.models.api.event_block import CreateEventBlockRequest
+from robosystems.models.api.event_block import (
+  CreateEventBlockRequest,
+  UpdateEventBlockRequest,
+)
 from robosystems.models.api.extensions.journal_entries import (
   ReverseJournalEntryRequest,
 )
@@ -18,7 +21,10 @@ from robosystems.models.api.fact_provenance import AssertedProvenance
 from robosystems.models.extensions.element import Element
 from robosystems.models.extensions.roboledger import Agent, Event
 from robosystems.models.extensions.roboledger.entry import Entry
-from robosystems.operations.event_block.commands import create_event_block_in_session
+from robosystems.operations.event_block.commands import (
+  create_event_block_in_session,
+  update_event_block,
+)
 from robosystems.operations.roboledger.commands.fiscal_calendar import (
   close_period,
   reopen_period,
@@ -287,3 +293,93 @@ def test_a_reversed_payment_no_longer_settles_its_invoice(books):
     120_000,
     120_000,
   )
+
+
+AUGUST_END = date(2026, 8, 31)
+
+
+def _committed_bank_receipt(t, cents: int, *, settles: str) -> str:
+  """A bank-feed deposit committed against the invoice it pays, in a month
+  still open: its entry is a draft the close will post."""
+  body = CreateEventBlockRequest(
+    event_type="bank_transaction",
+    event_category="treasury",
+    source="manual",
+    occurred_at=datetime(2026, 8, 12, tzinfo=UTC),
+    amount=cents,
+    agent_id=t.agent.id,
+    resource_type="money",
+    resource_element_id=t.cash,
+  )
+  event, _ = create_event_block_in_session(t.session, body, "usr_1", graph_id=GRAPH_ID)
+  t.session.commit()
+  update_event_block(
+    t.session,
+    UpdateEventBlockRequest(
+      event_id=str(event.id),
+      transition_to="committed",
+      discharges_event_id=settles,
+      metadata_patch={"classified_element_id": t.receivables},
+    ),
+    "usr_1",
+    graph_id=GRAPH_ID,
+  )
+  t.session.commit()
+  t.session.expire_all()
+  return str(event.id)
+
+
+def test_a_payment_awaiting_the_close_ties_out_as_pending(books):
+  """The aging takes a committed payment as settling its invoice at once; the
+  control account moves when the close posts the payment's entry. The tie-out
+  carries the draft as pending, so the two agree before the close."""
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+  _close_july(t)
+  payment = _committed_bank_receipt(t, 120_000, settles=invoice)
+
+  entry = t.session.execute(
+    select(Entry).where(Entry.triggered_by_event_id == payment)
+  ).scalar_one()
+  assert (t.session.get(Event, payment).status, entry.status) == (
+    "committed",
+    "draft",
+  )
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=AUGUST_END, entity_id=t.parent.id
+  )
+  (tie_out,) = aged.tie_outs
+  assert aged.buckets.total_cents == 0
+  assert (
+    tie_out.control_balance_cents,
+    tie_out.pending_close_cents,
+    tie_out.difference_cents,
+  ) == (120_000, -120_000, 0)
+
+
+def test_a_voided_lines_draft_is_not_pending(books):
+  """A voided event's entry stays a draft the close never posts: it is not
+  pending in the tie-out."""
+  t = books
+  invoice = _document(
+    t, "invoice_issued", 120_000, 5, debit=t.receivables, credit=t.revenue
+  )
+  _close_july(t)
+  payment = _committed_bank_receipt(t, 120_000, settles=invoice)
+  update_event_block(
+    t.session,
+    UpdateEventBlockRequest(event_id=payment, transition_to="voided"),
+    "usr_1",
+    graph_id=GRAPH_ID,
+  )
+  t.session.commit()
+  t.session.expire_all()
+
+  aged = get_aged_balances(
+    t.session, "receivables", as_of=AUGUST_END, entity_id=t.parent.id
+  )
+  (tie_out,) = aged.tie_outs
+  assert aged.buckets.total_cents == 120_000
+  assert (tie_out.pending_close_cents, tie_out.difference_cents) == (0, 0)

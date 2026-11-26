@@ -104,8 +104,8 @@ _RECURRING_SEQUENCE: list[str] = [
   "the aging, and each entity's open items tied out to its control account. "
   "A difference_cents is a document never settled or a movement with no "
   "document behind it (a write-off, an unlinked payment, an opening balance); "
-  "explain it, never plug it. An obligation whose entry is still a draft "
-  "shows in it until the close posts the entry.",
+  "explain it, never plug it. A committed document whose entry is still a "
+  "draft is pending_close_cents, not a difference: the close posts it.",
   "get-trial-balance (end_date the month-end) and list-reconciliations "
   "(period as YYYY-MM) — the books as they stand, read from the ledger, not "
   "the graph, which lags it: each account's balance, and each "

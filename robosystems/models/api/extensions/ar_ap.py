@@ -203,8 +203,8 @@ class ControlAccount(BaseModel):
 class ControlTieOut(BaseModel):
   """One entity's open items against its receivables or payables accounts at
   the as-of date. The difference is everything that moved the accounts
-  without a document behind it, or a document whose entry has not posted:
-  never plugged."""
+  without a document behind it: never plugged. A document the aging already
+  counts whose entry waits for the close is pending, not a difference."""
 
   entity_id: str = Field(..., description="The entity whose books are compared.")
   accounts: list[ControlAccount] = Field(
@@ -221,14 +221,22 @@ class ControlTieOut(BaseModel):
       "null when the entity has no control account."
     ),
   )
+  pending_close_cents: Cents = Field(
+    0,
+    description=(
+      "What the close will post to the accounts, dated by the as-of date, "
+      "from documents the aging already counts (a committed payment in an "
+      "open month), in the accounts' natural sign."
+    ),
+  )
   open_items_cents: Cents = Field(
     ..., description="The entity's open items at the as-of date, intercompany included."
   )
   difference_cents: Cents | None = Field(
     None,
     description=(
-      "Open items less the control balance; null when there is no control "
-      "account to compare with."
+      "Open items less the control balance and what is pending at the close; "
+      "null when there is no control account to compare with."
     ),
   )
 

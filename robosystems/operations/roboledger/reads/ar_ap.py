@@ -627,18 +627,37 @@ def _tie_out(
 ) -> ControlTieOut:
   accounts = _control_accounts(session, kind, entity_id)
   balance: int | None = None
+  pending = 0
   if accounts:
-    net = session.execute(
-      select(func.coalesce(func.sum(LineItem.debit_amount - LineItem.credit_amount), 0))
-      .join(Entry, Entry.id == LineItem.entry_id)
-      .where(
-        LineItem.element_id.in_([a.id for a in accounts]),
-        Entry.entity_id == entity_id,
-        Entry.status.in_(LANDED_ENTRY_STATUSES),
-        Entry.posting_date <= as_of,
+    sign = 1 if kind == "receivables" else -1
+
+    def net(*status) -> int:
+      return sign * int(
+        session.execute(
+          select(
+            func.coalesce(func.sum(LineItem.debit_amount - LineItem.credit_amount), 0)
+          )
+          .join(Entry, Entry.id == LineItem.entry_id)
+          .where(
+            LineItem.element_id.in_([a.id for a in accounts]),
+            Entry.entity_id == entity_id,
+            Entry.posting_date <= as_of,
+            *status,
+          )
+        ).scalar_one()
       )
-    ).scalar_one()
-    balance = int(net) if kind == "receivables" else -int(net)
+
+    balance = net(Entry.status.in_(LANDED_ENTRY_STATUSES))
+    # The aging counts a committed document at once, while its entry may be a
+    # draft the close posts (a bank line committed in an open month). A voided
+    # event's draft never posts, so only counted documents' drafts are pending.
+    pending = net(
+      Entry.status == "draft",
+      exists().where(
+        Event.id == Entry.triggered_by_event_id,
+        Event.status.in_(_OPEN_BALANCE_STATUSES),
+      ),
+    )
   return ControlTieOut(
     entity_id=entity_id,
     accounts=[
@@ -646,8 +665,9 @@ def _tie_out(
       for a in accounts
     ],
     control_balance_cents=balance,
+    pending_close_cents=pending,
     open_items_cents=open_items_cents,
-    difference_cents=None if balance is None else open_items_cents - balance,
+    difference_cents=None if balance is None else open_items_cents - balance - pending,
   )
 
 
