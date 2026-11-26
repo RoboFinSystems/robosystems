@@ -355,7 +355,8 @@ class UserRepositoryCredits(Base):
     """Allocate monthly credits if due. Credits do not roll over.
 
     The balance is replaced by ``monthly_allocation``, matching ``GraphCredits``
-    and the no-rollover promise on the offering page.
+    and the no-rollover promise on the offering page; the unspent remainder is
+    recorded as an EXPIRATION, so the pool's transactions sum to its balance.
     """
     now = datetime.now(UTC)
 
@@ -367,6 +368,7 @@ class UserRepositoryCredits(Base):
         return False
 
     self.credits_consumed_this_month = Decimal("0")
+    forfeited = Decimal(str(self.current_balance or 0))
 
     MAX_BALANCE = Decimal("99999999.99")  # Ceiling of the Numeric(10, 2) column
     new_balance = self.monthly_allocation
@@ -385,6 +387,16 @@ class UserRepositoryCredits(Base):
     # Read by the Dagster op's due-pool filter.
     self.next_allocation_date = _first_of_next_month(now)
     self.updated_at = now
+
+    if forfeited > 0:
+      UserRepositoryCreditTransaction.create_transaction(
+        credit_pool_id=cast(str, self.id),
+        transaction_type=UserRepositoryCreditTransactionType.EXPIRATION,
+        amount=-forfeited,
+        description="Unspent credits forfeited at monthly reset (no rollover)",
+        metadata={"expiration_type": "monthly_reset"},
+        session=session,
+      )
 
     UserRepositoryCreditTransaction.create_transaction(
       credit_pool_id=cast(str, self.id),
