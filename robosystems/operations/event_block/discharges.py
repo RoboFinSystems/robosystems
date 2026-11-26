@@ -4,9 +4,9 @@ every write.
 A payment settles invoices when money comes in and bills when it goes out:
 ``payment_received`` and ``bill_paid`` say so by type, a bank line by the sign
 of its amount. A journal entry moves no cash, so it may settle either: bills a
-creditor converts into a note, or invoices written off. The documents must be the payment's own entity's and not
-retracted. A different counterparty is allowed, since a parent can pay a
-subsidiary's bill. Allocations may not apply more than the payment's
+creditor converts into a note, or invoices written off. The documents must be
+the payment's own entity's and not retracted. A different counterparty is
+allowed, since a parent can pay a subsidiary's bill. Allocations may not apply more than the payment's
 magnitude; an overpayment shows as unapplied credit on the document instead.
 A QuickBooks payment's settlement is QuickBooks', written by the sync, and is
 changed there.
