@@ -124,8 +124,10 @@ def test_selfhost_cors_and_passkeys_follow_the_app_urls(monkeypatch):
 
   origins = EnvConfig.get_main_cors_origins()
 
-  assert "https://app.serve.example.com" in origins
-  assert "https://ledger.serve.example.com" in origins
+  assert {
+    "https://app.serve.example.com",
+    "https://ledger.serve.example.com",
+  } <= set(origins)
   assert not any(origin.startswith("http://localhost") for origin in origins)
   assert EnvConfig.get_passkey_rp_id() == "app.serve.example.com"
   assert EnvConfig.get_passkey_origin() == "https://app.serve.example.com"
