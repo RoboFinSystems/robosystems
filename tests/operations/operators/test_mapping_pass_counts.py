@@ -218,6 +218,22 @@ async def test_a_contra_takes_its_gross_siblings_concept_without_the_model():
 
 
 @pytest.mark.asyncio
+async def test_a_contra_is_flagged_when_its_siblings_mapping_was_a_guess():
+  contra = {
+    "id": "el_amort",
+    "name": "Accumulated Amortization",
+    "trait": "contraAsset",
+    "nets_against": {**_NETS, "confidence": 0.7},
+  }
+  result, create, model = await _run_with([contra], {"association_id": "a"}, [])
+
+  assert [c["confidence"] for c in create.calls] == [0.7]
+  model.assert_not_called()
+  assert result.metadata["mapped"] == 0
+  assert result.metadata["flagged"] == 1
+
+
+@pytest.mark.asyncio
 async def test_accumulated_depreciation_keeps_its_name_rule():
   """The PP&E contra concept wins over the gross sibling's, as before."""
   contra = {

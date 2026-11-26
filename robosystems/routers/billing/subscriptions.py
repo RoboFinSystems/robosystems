@@ -18,6 +18,7 @@ from ...models.core.billing import (
   BillingEventType,
   BillingSubscription,
 )
+from ...models.core.billing.subscription import TERMINAL_SUBSCRIPTION_STATUSES
 from ...operations.providers.payment_provider import get_payment_provider
 
 logger = get_logger(__name__)
@@ -467,6 +468,25 @@ async def resume_subscription(
         "be taken back, and only before the period ends."
       ),
     )
+
+  # A seat bought again while this one ran out its period is the live one;
+  # keeping both would renew both.
+  if subscription.resource_type == "repository" and subscription.user_id:
+    replacement = BillingSubscription.get_by_resource_and_user(
+      resource_type="repository",
+      resource_id=subscription.resource_id,
+      user_id=subscription.user_id,
+      session=db,
+      exclude_statuses=TERMINAL_SUBSCRIPTION_STATUSES,
+    )
+    if replacement is not None and replacement.id != subscription.id:
+      raise HTTPException(
+        status_code=409,
+        detail=(
+          "A newer subscription to this repository is already in force, so "
+          "this one cannot be kept as well."
+        ),
+      )
 
   # Provider first: if Stripe still holds the cancel, nothing local changes.
   if subscription.stripe_subscription_id:

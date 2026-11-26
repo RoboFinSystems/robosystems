@@ -136,3 +136,33 @@ async def test_the_authority_that_cancels_is_the_one_that_keeps(
     with pytest.raises(HTTPException) as refused:
       await _resume(test_db, test_org, subscription, other_user)
     assert refused.value.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_a_seat_bought_again_cannot_be_kept_twice(test_db, test_user, test_org):
+  ending = _subscription(test_db, test_org, test_user, resource_type="repository")
+  replacement = BillingSubscription.create_subscription(
+    org_id=test_org.id,
+    resource_type="repository",
+    resource_id=ending.resource_id,
+    plan_name="starter",
+    base_price_cents=2900,
+    session=test_db,
+    user_id=test_user.id,
+  )
+  replacement.activate(test_db)
+
+  with patch(f"{_ROUTE}.get_payment_provider") as provider:
+    with pytest.raises(HTTPException) as refused:
+      await resume_subscription(
+        org_id=test_org.id,
+        subscription_id=ending.id,
+        current_user=test_user,
+        db=test_db,
+        _rate_limit=None,
+      )
+
+  assert refused.value.status_code == 409
+  provider.return_value.stripe.Subscription.modify.assert_not_called()
+  test_db.refresh(ending)
+  assert ending.status == "canceled"

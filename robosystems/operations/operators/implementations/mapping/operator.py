@@ -253,17 +253,28 @@ class MappingOperator(Operator):
     # A contra-asset nets against its gross sibling: the chart says what it
     # reduces, which its name cannot, so it takes the sibling's concept
     # without the model. The accumulated-depreciation name rule keeps
-    # precedence.
+    # precedence. A sibling mapped below the approval floor passes its
+    # confidence on, so the contra is flagged with it.
     netted = [
       e
       for e in elements
       if e.get("nets_against") and not _deterministic_rs_gaap_override(e)
     ]
     for elem in netted:
-      outcome = await _write_mapping(
-        create_tool, mapping_id, elem["id"], elem["nets_against"]["element_id"], 1.0
+      sibling_confidence = elem["nets_against"].get("confidence")
+      guessed = (
+        sibling_confidence is not None and sibling_confidence < CONFIDENCE_AUTO_APPROVE
       )
-      if outcome == "written":
+      outcome = await _write_mapping(
+        create_tool,
+        mapping_id,
+        elem["id"],
+        elem["nets_against"]["element_id"],
+        sibling_confidence if guessed else 1.0,
+      )
+      if outcome == "written" and guessed:
+        flagged += 1
+      elif outcome == "written":
         mapped += 1
       elif outcome == "refused":
         refused_closed_history += 1
