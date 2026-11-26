@@ -8,11 +8,13 @@ Every RoboSystems graph is an MCP server; this page covers connecting a client, 
 
 ## Connecting from MCP Clients
 
-Every graph is an MCP server, served over MCP's Streamable HTTP transport directly by the API. There are two ways in:
+Every graph is an MCP server, served over MCP's Streamable HTTP transport directly by the API. A client connects to one graph by address, in one of two ways:
 
 > **OAuth (recommended):** `https://api.robosystems.ai/v1/mcp` — one URL for everyone. The client discovers the authorization server, you sign in to RoboSystems, and the consent screen asks **which graph** to connect: your own graphs, their subgraphs, and the shared repositories you subscribe to. One authorization is one graph; to work on another graph, reconnect and pick it. On the RoboLedger route (`/v1/mcp/roboledger`, [below](#the-mcp-tool-surface)) the screen offers only RoboLedger tenant graphs — no subgraphs, no shared repositories.
 >
 > **API key:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — the graph is in the URL (`sec` for the public SEC repository, your graph id for a tenant graph; a subgraph id such as `kg…_dev` is just another URL). The key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide or **graph-scoped** — valid only for one graph and its subgraphs.
+
+To work across several graphs from one connection, or to create subgraphs and use them without adding a connection for each, run [the MCP bridge](The-MCP-Bridge.md): a local program that takes an API key and reaches every graph the key covers.
 
 The OAuth path is what a directory listing uses — [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) in Claude's connector directory and the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) in ChatGPT's plugin directory both connect this way — and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
 
@@ -30,7 +32,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-**Claude (claude.ai / Desktop)** — Customize → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries). For SEC filings alone, add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory instead: no address to paste, and the connection is pinned to the `sec` repository (`/v1/graphs/sec/mcp`, read-only tools).
+**Claude (claude.ai / Desktop)** — Customize → Connectors → Add custom connector with `https://api.robosystems.ai/v1/mcp`; the dialog detects OAuth and the hosted client metadata on its own. Header-only clients (scripts, CI, editors without OAuth) put an API key in `X-API-Key` on a per-graph URL — the **MCP page** in the app (`/connect`) mints keys scoped to one graph for exactly that, and Claude's connector dialog accepts custom request headers too. Credentials never travel in the URL: the `?token=` connector URL was the bridge to OAuth and was retired once OAuth covered those clients. Claude Desktop can alternatively run [the MCP bridge](The-MCP-Bridge.md) via `claude_desktop_config.json` (which accepts only stdio-shaped `command` entries). For SEC filings alone, add [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) from Claude's connector directory instead: no address to paste, and the connection is pinned to the `sec` repository (`/v1/graphs/sec/mcp`, read-only tools).
 
 **ChatGPT** — install the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) from the ChatGPT plugin directory and sign in. Since v1.1.0 the directory version is pinned to the SEC EDGAR repository (`/v1/graphs/sec/mcp`) — statements, fact grids, disclosures and information blocks, read-only Cypher, filing text search — so it no longer reaches a tenant graph. For a RoboLedger graph in ChatGPT — close, mapping, journal entries — add the server as a custom connector in developer mode (Settings → Connectors → Create) with `https://api.robosystems.ai/v1/mcp`; a custom connector serves every tool of the graph you pick at consent.
 
@@ -562,6 +564,7 @@ Operators on a stack you run can use an open-weight model in place of the Bedroc
 - **[GraphQL Reads](GraphQL-Reads.md)** - The typed operational read surface in depth
 - **[Search and AI Retrieval](Search-and-AI-Retrieval.md)** - The document index and hybrid search in depth
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Running the operators on a model you choose
+- **[The MCP Bridge](The-MCP-Bridge.md)** - One local connection for every graph an API key covers
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns

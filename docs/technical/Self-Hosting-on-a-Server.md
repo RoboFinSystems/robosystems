@@ -109,7 +109,7 @@ claude mcp add --transport http robosystems \
   --header "X-API-Key: rfs..."
 ```
 
-Clients that cannot send a header use the stdio bridge. The operator endpoint and the tool surface are described in [AI Operators & MCP](AI-Operators-and-MCP.md). Connectors that run on a vendor's servers, such as the claude.ai and ChatGPT connectors, cannot reach a name that only your network resolves. That is the point of this shape.
+Clients that cannot send a header, and anyone who wants one connection for every graph on the server, use [the MCP bridge](The-MCP-Bridge.md) with `ROBOSYSTEMS_API_URL` set to the server's address. The operator endpoint and the tool surface are described in [AI Operators & MCP](AI-Operators-and-MCP.md). Connectors that run on a vendor's servers, such as the claude.ai and ChatGPT connectors, cannot reach a name that only your network resolves. That is the point of this shape.
 
 **Trusting your certificate.** If the certificate comes from your own CA, each laptop has to trust its root. The operating system's store covers browsers, `curl` on macOS, and Claude Code, which reads the OS store by default ([Claude Code network configuration](https://code.claude.com/docs/en/network-config)). Python does not. The Python SDK, the demo scripts and the integration template trust a bundled list of public roots instead, and fail with `CERTIFICATE_VERIFY_FAILED` until `SSL_CERT_FILE` names a file that holds the public roots plus yours. The variable replaces the bundled list rather than adding to it, so build a bundle:
 
