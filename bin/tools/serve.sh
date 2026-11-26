@@ -9,6 +9,7 @@
 #   bin/tools/serve.sh restart [service]
 #   bin/tools/serve.sh reboot
 #   bin/tools/serve.sh resize small|medium|large
+#   bin/tools/serve.sh allow <address|me>
 #   bin/tools/serve.sh snapshot
 #   bin/tools/serve.sh set <KEY> [value]
 #   bin/tools/serve.sh unset <KEY>
@@ -182,6 +183,26 @@ size_type() {
   esac
 }
 
+# one_address <address|me>: the /32 that 443 opens to. One address, never a
+# range: that is what this shape is, one operator's own deployment.
+one_address() {
+  local cidr=$1 address
+  if [ "$cidr" = "me" ]; then
+    address=$(curl -sf --max-time 10 https://checkip.amazonaws.com) ||
+      die "could not read this machine's public address; pass an address"
+    cidr="${address}/32"
+  fi
+  case $cidr in
+  */32) ;;
+  */*) die "443 opens to one address: pass it as <address>/32, not a range ($cidr)" ;;
+  *) cidr="${cidr}/32" ;;
+  esac
+  case ${cidr%/32} in
+  *[!0-9.]* | '') die "not an IPv4 address: ${cidr%/32}" ;;
+  esac
+  echo "$cidr"
+}
+
 # A compose service name, safe to place in a command.
 service_name() {
   case "$1" in
@@ -248,17 +269,7 @@ cmd_launch() {
   fi
 
   [ -n "$cidr" ] || cidr=$(ask "The one address allowed to reach it on 443 (\"me\" = this machine)" "me")
-  if [ "$cidr" = "me" ]; then
-    address=$(curl -sf --max-time 10 https://checkip.amazonaws.com) ||
-      die "could not read this machine's public address; pass an address"
-    cidr="${address}/32"
-  fi
-  # One address, never a range: the stack is not built to face a network.
-  case $cidr in
-  */32) ;;
-  */*) die "443 opens to one address: pass it as <address>/32, not a range ($cidr)" ;;
-  *) cidr="${cidr}/32" ;;
-  esac
+  cidr=$(one_address "$cidr")
 
   vpc=${VPC_ID:-}
   if [ -z "$vpc" ]; then
@@ -422,6 +433,39 @@ cmd_reboot() {
   confirm "Reboot instance $INSTANCE ($STACK)? The stack is down until it is back."
   aws ec2 reboot-instances --instance-ids "$INSTANCE"
   echo "Rebooting. The containers start by themselves; check with: just serve status"
+}
+
+# Moves the one address 443 opens to, when the operator's own address changes.
+# It replaces the address and never adds one. Like resize it goes through EC2,
+# so the stack keeps reporting the address it launched with.
+ALLOWED_RULE="The stack, through Caddy"
+cmd_allow() {
+  [ $# -eq 1 ] || die "usage: just serve allow <address|me>"
+  local cidr group current old address present
+  cidr=$(one_address "$1")
+  load_target
+  group=$(aws cloudformation describe-stack-resource --stack-name "$STACK" \
+    --logical-resource-id ServeSecurityGroup \
+    --query StackResourceDetail.PhysicalResourceId --output text)
+  current=$(aws ec2 describe-security-group-rules --filters "Name=group-id,Values=$group" \
+    --query "SecurityGroupRules[?!IsEgress && FromPort==\`443\` && Description=='$ALLOWED_RULE'].[SecurityGroupRuleId,CidrIpv4]" \
+    --output text)
+  present=$(awk -v cidr="$cidr" '$2 == cidr' <<<"$current")
+  if [ -n "$present" ] && [ "$(wc -l <<<"$current")" -eq 1 ]; then
+    echo "443 is already open to $cidr and to nothing else."
+    return
+  fi
+  confirm "Open 443 on $STACK to $cidr only, in place of $(awk '{print $2}' <<<"$current" | paste -sd' ' -)?"
+  # The new address first, so a failure never leaves the stack closed to both.
+  [ -n "$present" ] ||
+    aws ec2 authorize-security-group-ingress --group-id "$group" --ip-permissions \
+      "IpProtocol=tcp,FromPort=443,ToPort=443,IpRanges=[{CidrIp=$cidr,Description=\"$ALLOWED_RULE\"}]" >/dev/null
+  while read -r old address; do
+    [ -n "$old" ] && [ "$address" != "$cidr" ] || continue
+    aws ec2 revoke-security-group-ingress --group-id "$group" \
+      --security-group-rule-ids "$old" >/dev/null
+  done <<<"$current"
+  echo "443 is open to $cidr only."
 }
 
 # The instance type moves through EC2, not the stack: a stack update would
@@ -588,6 +632,6 @@ command -v aws >/dev/null 2>&1 || die "the AWS CLI is required"
 VERB=$1
 shift
 case "$VERB" in
-launch | status | upgrade | logs | restart | reboot | resize | snapshot | set | unset | tunnel | shell) "cmd_$VERB" "$@" ;;
+launch | status | upgrade | logs | restart | reboot | resize | allow | snapshot | set | unset | tunnel | shell) "cmd_$VERB" "$@" ;;
 *) usage ;;
 esac
