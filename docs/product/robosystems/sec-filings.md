@@ -61,7 +61,7 @@ Reading the SEC graph through an MCP client uses no RoboSystems credits. The rea
 
 New filings arrive on weekdays, in two steps:
 
-- **Usually the same day:** a new 10-K or 10-Q can be read whole, its disclosures opened section by section, and viewed. An earnings release on 8-K is readable within about half an hour of reaching EDGAR during the US business day, or the next morning if it arrives late in the evening.
+- **Usually the same day:** a new 10-K or 10-Q can be read whole, its disclosures opened section by section, and viewed. An earnings release on 8-K is picked up by a check that runs every 30 minutes from 6am to 8:30pm Eastern on business days, so it is usually readable the same day, or the next morning if it arrives later in the evening.
 - **The next morning:** its figures reach statements, comparisons and direct queries, and its text reaches search across filers.
 
 So on the day a company reports, ask to read its filing or release rather than for its statements.
