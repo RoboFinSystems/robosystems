@@ -139,7 +139,9 @@ async def lifespan(app: FastAPI):
     logger.info(f"Configuration validated successfully: {config_summary}")
   except Exception as e:
     logger.error(f"Configuration validation failed: {e}")
-    if env.is_deployed():
+    # Only a known development or test environment continues, so a mistyped
+    # ENVIRONMENT refuses to start instead of running relaxed.
+    if not (env.is_development() or env.is_test()):
       raise
     logger.warning("Continuing with invalid configuration (development mode)")
 

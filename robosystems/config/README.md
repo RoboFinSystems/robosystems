@@ -26,6 +26,8 @@ if env.is_production():
 | Development shortcuts: GraphiQL, echoed errors, private-network CORS | `env.is_development()` | dev |
 | AWS services: SSM, Secrets Manager, CloudWatch | `env.is_aws_environment()` | prod, staging |
 
+The Graph API process is held only to its own settings, and only on prod and staging: on a single-node stack it is internal to the box.
+
 A new `env.ENVIRONMENT == "dev"` is almost always one of the first two rows, and on a self-hosted stack it reads false.
 
 **Never hardcode a Valkey database number.** Databases are allocated in `valkey_registry.py` and referenced by enum member:

@@ -457,16 +457,25 @@ write_settings() {
 # Given as an argument it is in this machine's shell history; the prompt is not.
 # selfhost requires CONNECTION_CREDENTIALS_KEY. A stack that ran as dev
 # encrypted its connections with a key derived from the JWT secret, so that is
-# the key it pins; plain sh, so it runs on a stack of any age.
+# the key it pins. It first checks the JWT secret is one selfhost will accept.
+# Plain sh, so it runs on a stack of any age.
 PIN_CREDENTIALS_KEY=$(
   cat <<'EOF'
 cd /data/robosystems
+# The value as the application reads it: one pair of surrounding quotes off.
+JWT=$(grep -E '^JWT_SECRET_KEY=' .env | cut -d= -f2- | sed -E -e 's/^"(.*)"$/\1/' -e "s/^'(.*)'\$/\1/")
+# selfhost refuses to start on these, so refuse here, before anything changes.
+case "$JWT" in
+'' | your-* | *development* | *dev-jwt*)
+  echo "JWT_SECRET_KEY in .env is empty or a placeholder; selfhost would not start" >&2
+  exit 1
+  ;;
+esac
+[ "${#JWT}" -ge 32 ] || { echo "JWT_SECRET_KEY is shorter than 32 characters; selfhost would not start" >&2; exit 1; }
 if grep -qE '^CONNECTION_CREDENTIALS_KEY=.' .env; then
   echo "credentials key already set"
   exit 0
 fi
-JWT=$(grep -E '^JWT_SECRET_KEY=' .env | cut -d= -f2-)
-[ -n "$JWT" ] || { echo "no JWT_SECRET_KEY in .env" >&2; exit 1; }
 KEY=$(printf '%s_connection_encryption' "$JWT" | openssl dgst -sha256 -binary | base64 | tr '+/' '-_')
 sed -i -E '/^#? ?CONNECTION_CREDENTIALS_KEY=/d' .env
 printf 'CONNECTION_CREDENTIALS_KEY=%s\n' "$KEY" >>.env
