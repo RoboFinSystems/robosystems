@@ -297,7 +297,7 @@ Logs: `just logs api`, `just logs worker`.
 - [Documentation](https://robosystems.ai/docs/technical) — guides and tutorials
 - SDKs: [Python](https://github.com/RoboFinSystems/robosystems-python-client) ·
   [TypeScript](https://github.com/RoboFinSystems/robosystems-typescript-client) ·
-  [MCP](https://github.com/RoboFinSystems/robosystems-mcp-client)
+  [MCP](https://github.com/RoboFinSystems/robosystems-mcp-bridge)
 
 ## Support
 

@@ -153,7 +153,7 @@ claude mcp add --transport http robosystems-sec \
   --header "X-API-Key: <your key>"
 ```
 
-The app's MCP page (`/connect`) has the snippet for each client, filled in for the selected graph. More: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · the [stdio bridge](https://github.com/RoboFinSystems/robosystems-mcp-client) for clients without HTTP transport.
+The app's MCP page (`/connect`) has the snippet for each client, filled in for the selected graph. More: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · the [MCP bridge](https://github.com/RoboFinSystems/robosystems-mcp-bridge) for one local connection to every graph an API key covers.
 
 ### Client libraries
 
