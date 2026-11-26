@@ -22,7 +22,7 @@ There is no install step. The client runs the package through `npx`; it needs No
 ```json
 {
   "mcpServers": {
-    "robosystems": {
+    "robosystems-bridge": {
       "command": "npx",
       "args": ["-y", "@robosystems/mcp@latest"],
       "env": {
@@ -36,7 +36,7 @@ There is no install step. The client runs the package through `npx`; it needs No
 This is the shape of `claude_desktop_config.json` and of other clients that take stdio `command` entries. In Claude Code:
 
 ```bash
-claude mcp add robosystems -e ROBOSYSTEMS_API_KEY=<your key> -- npx -y @robosystems/mcp@latest
+claude mcp add robosystems-bridge -e ROBOSYSTEMS_API_KEY=<your key> -- npx -y @robosystems/mcp@latest
 ```
 
 Keep `@latest` in the arguments: a global `npm install -g @robosystems/mcp` can shadow `npx` and pin an old version. Creating and scoping keys is covered in [Authentication & API Keys](Authentication-and-API-Keys.md#api-key-lifecycle).

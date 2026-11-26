@@ -95,7 +95,7 @@ The RoboSystems bridge is a small program your MCP client runs locally. Give it 
 ```json
 {
   "mcpServers": {
-    "robosystems": {
+    "robosystems-bridge": {
       "command": "npx",
       "args": ["-y", "@robosystems/mcp@latest"],
       "env": { "ROBOSYSTEMS_API_KEY": "<your key>" }
