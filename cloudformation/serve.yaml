@@ -52,16 +52,17 @@ Parameters:
     Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-arm64
   InstanceType:
     Type: String
-    Description: EC2 instance type (ARM64/Graviton, 32 GB or more; the container memory caps total about 26 GB)
-    Default: r7g.xlarge
+    Description: EC2 instance type (ARM64/Graviton, 16 GB or more; the instance sizes its container memory caps from its own memory at every boot)
+    Default: r7g.large
     AllowedValues:
+      - r7g.large
       - r7g.xlarge
       - r7g.2xlarge
       - m7g.2xlarge
       - r8g.xlarge
       - r8g.2xlarge
       - m8g.2xlarge
-    ConstraintDescription: Must be a valid ARM64 instance type with at least 32 GB
+    ConstraintDescription: Must be a valid ARM64 instance type with at least 16 GB
   DataVolumeSize:
     Type: Number
     Description: Size of the data volume in GiB
@@ -359,18 +360,47 @@ Resources:
               cat "$APP/.env.next" >"$APP/.env"
               rm "$APP/.env.next"
             }
+            # size_caps: the container memory caps for the memory this machine
+            # has, written to .env. No SEC loading runs here, so the Dagster
+            # webserver stays small and the room goes to the Graph API and the
+            # daemon, where runs execute. The OpenSearch heap is half its cap.
+            size_caps() {
+              local total unit daemon graph
+              total=$(awk '/^MemTotal:/ { printf "%d", $2 / 1048576 }' /proc/meminfo)
+              if [ "$total" -lt 24 ]; then
+                total=16
+              elif [ "$total" -lt 48 ]; then
+                total=32
+              else
+                total=64
+              fi
+              unit=$((total / 16))
+              daemon=$((unit * 3))
+              graph=$((total - 10 - daemon - 2 * unit))
+              [ "$graph" -ge 4 ] || graph=4
+              set_env GRAPH_API_MEMORY_LIMIT "$graph"g
+              set_env DAGSTER_DAEMON_MEMORY_LIMIT "$daemon"g
+              set_env DAGSTER_WEBSERVER_MEMORY_LIMIT 2g
+              set_env PG_MEMORY_LIMIT "$unit"g
+              set_env OPENSEARCH_MEMORY_LIMIT "$unit"g
+              set_env OPENSEARCH_JAVA_OPTS "\"-Xms$((unit * 512))m -Xmx$((unit * 512))m\""
+            }
             EOF
             . /usr/local/lib/robosystems-serve.sh
 
             cat >/usr/local/bin/robosystems-apply-settings <<'EOF'
             #!/bin/bash
-            # Writes the stack's settings secret into .env, then recreates the
-            # containers whose settings changed. --no-restart only writes.
+            # Sizes the memory caps for this machine, writes the stack's settings
+            # secret into .env over them (so a cap set there wins), then
+            # recreates the containers whose settings changed. --no-restart
+            # only writes. Runs at every boot, which is how a resized instance
+            # gets its caps.
             set -euo pipefail
             export HOME=/root
             . /etc/robosystems-serve.conf
             . /usr/local/lib/robosystems-serve.sh
             cd "$APP"
+            size_caps
             SETTINGS=$(aws secretsmanager get-secret-value --region "$SERVE_REGION" \
               --secret-id "$SETTINGS_SECRET" --query SecretString --output text)
             while IFS= read -r KEY; do
@@ -397,6 +427,21 @@ Resources:
             docker compose -f compose.yaml --env-file .env --profile all up --detach
             EOF
             chmod +x /usr/local/bin/robosystems-apply-settings
+            cat >/etc/systemd/system/robosystems-apply-settings.service <<'EOF'
+            [Unit]
+            Description=RoboSystems Serve settings and memory caps for this boot
+            After=docker.service network-online.target
+            Wants=network-online.target
+            Requires=docker.service
+
+            [Service]
+            Type=oneshot
+            ExecStart=/usr/local/bin/robosystems-apply-settings
+
+            [Install]
+            WantedBy=multi-user.target
+            EOF
+            systemctl enable robosystems-apply-settings.service
 
             # A data volume that already carries a .env keeps it: its secrets
             # are the ones the databases on the same volume were created with.

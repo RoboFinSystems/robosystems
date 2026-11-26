@@ -8,6 +8,8 @@
 #   bin/tools/serve.sh logs <service> [lines]
 #   bin/tools/serve.sh restart [service]
 #   bin/tools/serve.sh reboot
+#   bin/tools/serve.sh resize small|medium|large
+#   bin/tools/serve.sh allow <address|me>
 #   bin/tools/serve.sh snapshot
 #   bin/tools/serve.sh set <KEY> [value]
 #   bin/tools/serve.sh unset <KEY>
@@ -25,7 +27,8 @@
 #   HOSTED_ZONE_ID        default: the account's public zone that holds the domain
 #   VPC_ID, SUBNET_ID     default: the region's default VPC and a public subnet of it
 #   ROBOSYSTEMS_VERSION   default: the newest release whose image is published
-#   INSTANCE_TYPE         default: the template's
+#   SIZE                  small (16 GB, the default), medium (32 GB) or large (64 GB)
+#   INSTANCE_TYPE         an instance type the template allows, instead of SIZE
 #   DATA_VOLUME_SIZE      default: the template's, in GiB
 #   SNAPSHOT_ID           start from a snapshot of an earlier data volume
 #   ANTHROPIC_API_KEY     configure the server-side operators (it reaches AWS in
@@ -169,6 +172,37 @@ on_instance() {
   fi
 }
 
+# size_type <size>: the instance type of a size. The container memory caps are
+# not chosen here: the instance sets them from its own memory at every boot.
+size_type() {
+  case "$1" in
+  small) echo r7g.large ;;
+  medium) echo r7g.xlarge ;;
+  large) echo r7g.2xlarge ;;
+  *) die "not a size: $1 (small is 16 GB, medium 32 GB, large 64 GB)" ;;
+  esac
+}
+
+# one_address <address|me>: the /32 that 443 opens to. One address, never a
+# range: that is what this shape is, one operator's own deployment.
+one_address() {
+  local cidr=$1 address
+  if [ "$cidr" = "me" ]; then
+    address=$(curl -sf --max-time 10 https://checkip.amazonaws.com) ||
+      die "could not read this machine's public address; pass an address"
+    cidr="${address}/32"
+  fi
+  case $cidr in
+  */32) ;;
+  */*) die "443 opens to one address: pass it as <address>/32, not a range ($cidr)" ;;
+  *) cidr="${cidr}/32" ;;
+  esac
+  case ${cidr%/32} in
+  *[!0-9.]* | '') die "not an IPv4 address: ${cidr%/32}" ;;
+  esac
+  echo "$cidr"
+}
+
 # A compose service name, safe to place in a command.
 service_name() {
   case "$1" in
@@ -235,17 +269,7 @@ cmd_launch() {
   fi
 
   [ -n "$cidr" ] || cidr=$(ask "The one address allowed to reach it on 443 (\"me\" = this machine)" "me")
-  if [ "$cidr" = "me" ]; then
-    address=$(curl -sf --max-time 10 https://checkip.amazonaws.com) ||
-      die "could not read this machine's public address; pass an address"
-    cidr="${address}/32"
-  fi
-  # One address, never a range: the stack is not built to face a network.
-  case $cidr in
-  */32) ;;
-  */*) die "443 opens to one address: pass it as <address>/32, not a range ($cidr)" ;;
-  *) cidr="${cidr}/32" ;;
-  esac
+  cidr=$(one_address "$cidr")
 
   vpc=${VPC_ID:-}
   if [ -z "$vpc" ]; then
@@ -289,11 +313,20 @@ cmd_launch() {
     ;;
   esac
 
+  local size=${SIZE:-} instance_type=${INSTANCE_TYPE:-}
+  if [ -z "$instance_type" ]; then
+    if [ -z "$size" ] && [ -t 0 ]; then
+      size=$(ask "Size: small (16 GB), medium (32 GB) or large (64 GB)" "small")
+    fi
+    size=${size:-small}
+    instance_type=$(size_type "$size")
+  fi
+
   local params=(
     "VpcId=$vpc" "PublicSubnetId=$subnet" "AllowedCidr=$cidr"
     "HostedZoneId=$zone" "DomainName=$domain" "RobosystemsVersion=$version"
+    "InstanceType=$instance_type"
   )
-  [ -z "${INSTANCE_TYPE:-}" ] || params+=("InstanceType=$INSTANCE_TYPE")
   [ -z "${DATA_VOLUME_SIZE:-}" ] || params+=("DataVolumeSize=$DATA_VOLUME_SIZE")
   [ -z "${SNAPSHOT_ID:-}" ] || params+=("DataVolumeSnapshotId=$SNAPSHOT_ID")
   [ -z "${ANTHROPIC_API_KEY:-}" ] || params+=("AnthropicApiKey=$ANTHROPIC_API_KEY")
@@ -304,6 +337,7 @@ RoboSystems Serve
   account     $ACCOUNT ($REGION), profile $profile
   stack       $STACK
   release     $version
+  instance    $instance_type${size:+ ($size)}
   names       api. app. ledger. investor. s3. under $domain (zone ${zone_name:-$zone})
   reachable   443 from $cidr
   network     $vpc / $subnet
@@ -351,7 +385,8 @@ EOF
 cmd_status() {
   load_target
   echo "stack $STACK in $ACCOUNT ($REGION), instance $INSTANCE: $(aws ec2 describe-instances \
-    --instance-ids "$INSTANCE" --query 'Reservations[0].Instances[0].State.Name' --output text)"
+    --instance-ids "$INSTANCE" \
+    --query 'Reservations[0].Instances[0].[InstanceType,State.Name]' --output text | tr '\t' ' ')"
   on_instance 60 "cd /data/robosystems
 echo \"release: \$(grep -E '^ROBOSYSTEMS_IMAGE=' .env | cut -d: -f2), API reports \$(curl -sf --max-time 5 http://127.0.0.1:8000/v1/status | jq -er .details.version 2>/dev/null || echo 'no answer')\"
 docker ps --all --format 'table {{.Names}}\t{{.Status}}'
@@ -398,6 +433,67 @@ cmd_reboot() {
   confirm "Reboot instance $INSTANCE ($STACK)? The stack is down until it is back."
   aws ec2 reboot-instances --instance-ids "$INSTANCE"
   echo "Rebooting. The containers start by themselves; check with: just serve status"
+}
+
+# Moves the one address 443 opens to, when the operator's own address changes.
+# It replaces the address and never adds one. Like resize it goes through EC2,
+# so the stack keeps reporting the address it launched with.
+ALLOWED_RULE="The stack, through Caddy"
+cmd_allow() {
+  [ $# -eq 1 ] || die "usage: just serve allow <address|me>"
+  local cidr group current old address present
+  cidr=$(one_address "$1")
+  load_target
+  group=$(aws cloudformation describe-stack-resource --stack-name "$STACK" \
+    --logical-resource-id ServeSecurityGroup \
+    --query StackResourceDetail.PhysicalResourceId --output text)
+  current=$(aws ec2 describe-security-group-rules --filters "Name=group-id,Values=$group" \
+    --query "SecurityGroupRules[?!IsEgress && FromPort==\`443\` && Description=='$ALLOWED_RULE'].[SecurityGroupRuleId,CidrIpv4]" \
+    --output text)
+  present=$(awk -v cidr="$cidr" '$2 == cidr' <<<"$current")
+  if [ -n "$present" ] && [ "$(wc -l <<<"$current")" -eq 1 ]; then
+    echo "443 is already open to $cidr and to nothing else."
+    return
+  fi
+  confirm "Open 443 on $STACK to $cidr only, in place of $(awk '{print $2}' <<<"$current" | paste -sd' ' -)?"
+  # The new address first, so a failure never leaves the stack closed to both.
+  [ -n "$present" ] ||
+    aws ec2 authorize-security-group-ingress --group-id "$group" --ip-permissions \
+      "IpProtocol=tcp,FromPort=443,ToPort=443,IpRanges=[{CidrIp=$cidr,Description=\"$ALLOWED_RULE\"}]" >/dev/null
+  while read -r old address; do
+    [ -n "$old" ] && [ "$address" != "$cidr" ] || continue
+    aws ec2 revoke-security-group-ingress --group-id "$group" \
+      --security-group-rule-ids "$old" >/dev/null
+  done <<<"$current"
+  echo "443 is open to $cidr only."
+}
+
+# The instance type moves through EC2, not the stack: a stack update would
+# re-resolve the Amazon Linux image and could replace the instance. The stack
+# keeps reporting the type it launched with. The data volume and the address
+# stay attached across the stop, and the instance sets its memory caps from
+# the memory it finds when it starts.
+cmd_resize() {
+  [ $# -eq 1 ] || die "usage: just serve resize small|medium|large"
+  local target current
+  target=$(size_type "$1")
+  load_target
+  current=$(aws ec2 describe-instances --instance-ids "$INSTANCE" \
+    --query 'Reservations[0].Instances[0].InstanceType' --output text)
+  [ "$current" != "$target" ] || die "instance $INSTANCE is already $target"
+  confirm "Resize $INSTANCE ($STACK) from $current to $target? The stack is down for a few minutes while it stops and starts."
+  aws ec2 stop-instances --instance-ids "$INSTANCE" >/dev/null
+  echo "Stopping."
+  aws ec2 wait instance-stopped --instance-ids "$INSTANCE"
+  if ! aws ec2 modify-instance-attribute --instance-id "$INSTANCE" \
+    --instance-type "Value=$target"; then
+    aws ec2 start-instances --instance-ids "$INSTANCE" >/dev/null
+    die "could not change the type; the instance is starting again as $current"
+  fi
+  aws ec2 start-instances --instance-ids "$INSTANCE" >/dev/null
+  echo "Starting as $target."
+  aws ec2 wait instance-running --instance-ids "$INSTANCE"
+  echo "Running. The containers come back with caps sized for it; check with: just serve status"
 }
 
 cmd_snapshot() {
@@ -545,6 +641,6 @@ command -v aws >/dev/null 2>&1 || die "the AWS CLI is required"
 VERB=$1
 shift
 case "$VERB" in
-launch | status | upgrade | logs | restart | reboot | snapshot | set | unset | tunnel | shell) "cmd_$VERB" "$@" ;;
+launch | status | upgrade | logs | restart | reboot | resize | allow | snapshot | set | unset | tunnel | shell) "cmd_$VERB" "$@" ;;
 *) usage ;;
 esac
