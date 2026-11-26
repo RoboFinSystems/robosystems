@@ -1246,7 +1246,7 @@ class InformationBlockResponse(BaseModel):
 # xbrlkit's text tools over one filing read whole: its own document on the SEC
 # repository (an 8-K with its exhibits included), its text blocks on a tenant.
 
-# xbrlkit's caps (`xbrlkit.serve.tools.MAX_WINDOW` / `MAX_HITS` / `MAX_READ`),
+# xbrlkit's caps (`xbrlkit.serve.MAX_WINDOW` / `MAX_HITS` / `MAX_READ`),
 # restated so the request models need not import the tool module; the view
 # tests pin them equal.
 SEARCH_TEXT_MAX_WINDOW = 1500
