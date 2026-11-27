@@ -31,11 +31,7 @@ from robosystems.middleware.auth.dependencies import (
   get_account_api_key_user,
 )
 from robosystems.middleware.graph import types as graph_types
-from robosystems.middleware.mcp.tools.annotations import WRITE_TOOL_HINTS, tool_hints
-from robosystems.middleware.mcp.tools.classification import (
-  CYPHER_READ_TOOLS,
-  READ_ONLY_MCP_TOOLS,
-)
+from robosystems.middleware.mcp.tools.annotations import tool_hints
 from robosystems.middleware.operations import run_off_loop
 from robosystems.middleware.otel.metrics import endpoint_metrics_decorator
 from robosystems.middleware.rate_limits import (
@@ -250,7 +246,11 @@ class ConnectionScope:
 
 
 def _covers(entry_graph_id: str, graph_id: str) -> bool:
-  """A configured graph covers itself and its subgraphs."""
+  """A configured graph covers itself and its subgraphs.
+
+  Relies on a subgraph id being ``{parent}_{name}`` and no top-level id
+  containing an underscore.
+  """
   return graph_id == entry_graph_id or graph_id.startswith(f"{entry_graph_id}_")
 
 
@@ -408,7 +408,11 @@ async def _charge(request: Request) -> None:
 
 
 async def _enter_graph(
-  request: Request, api_key: str, scope: ConnectionScope, ref: Any
+  request: Request,
+  current_user: User,
+  api_key: str,
+  scope: ConnectionScope,
+  ref: Any,
 ) -> str:
   """The one way into a graph on this route. Returns its id, or refuses.
 
@@ -419,7 +423,11 @@ async def _enter_graph(
   try:
     graph_id = scope.resolve(ref)
     try:
-      await authorize_api_key_on_graph(request, api_key, graph_id)
+      # The route already validated the key, so a refusal here is this
+      # user lacking the graph, and is audited as that.
+      await authorize_api_key_on_graph(
+        request, api_key, graph_id, known_user_id=str(current_user.id)
+      )
     except HTTPException as e:
       if e.status_code != http_status.HTTP_403_FORBIDDEN:
         raise
@@ -427,7 +435,7 @@ async def _enter_graph(
         f"This API key cannot reach graph {graph_id}. `list-graphs` returns "
         "the graphs it can."
       ) from e
-  except _Refusal:
+  except _Refusal, HTTPException:
     await _charge(request)
     raise
   await _charge(request)
@@ -627,12 +635,6 @@ async def _get_tools(
   return _json_result(msg_id, payload)
 
 
-def _is_known_tool(name: str) -> bool:
-  return (
-    name in READ_ONLY_MCP_TOOLS or name in CYPHER_READ_TOOLS or name in WRITE_TOOL_HINTS
-  )
-
-
 async def _call_graph_tool(
   request: Request,
   msg_id: Any,
@@ -654,12 +656,8 @@ async def _call_graph_tool(
     return _tool_error_result(
       msg_id, f"Graph {graph_id} is read-only on this connection."
     )
-  if not _is_known_tool(name):
-    return _tool_error_result(
-      msg_id,
-      f'There is no tool named "{name}". Call `get-tools` with this graph for '
-      "the tools it serves.",
-    )
+  # A name no table lists is a write here, as it is in the annotations
+  # `get-tools` splits its index on, so the graph itself answers for it.
   is_read = tool_hints(name).read_only
   if is_read != want_read:
     if want_read and withheld:
@@ -714,7 +712,9 @@ async def _handle_catalog_call(
     return await _list_graphs(msg_id, current_user, scope)
 
   try:
-    graph_id = await _enter_graph(request, api_key, scope, args.get("graph"))
+    graph_id = await _enter_graph(
+      request, current_user, api_key, scope, args.get("graph")
+    )
   except _Refusal as refusal:
     return _tool_error_result(msg_id, str(refusal))
 

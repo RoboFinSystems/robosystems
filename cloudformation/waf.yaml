@@ -158,8 +158,9 @@ Resources:
                       - Priority: 1
                         Type: HTML_ENTITY_DECODE
                 # Cross-site scripting - Request Body, everywhere except the MCP
-                # endpoints. A path ending in /mcp, /mcp/roboledger or /mcp/graphs carries JSON-RPC whose string
-                # values are text a client stores (notes, summaries, markdown),
+                # endpoints. A path ending in /mcp, /mcp/roboledger or /mcp/graphs
+                # carries JSON-RPC whose string values are text a client stores
+                # (notes, summaries, markdown),
                 # and the API answers JSON and renders none of it, so a markup
                 # signature there only rejects prose.
                 - AndStatement:

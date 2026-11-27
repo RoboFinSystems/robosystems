@@ -343,7 +343,22 @@ class TestEnterGraph:
     ):
       request = _request(_call(GET_TOOLS, {"graph": KG}))
       await _dispatch(None, request=request)
-    authorize.assert_awaited_once_with(request, KEY, KG)
+    authorize.assert_awaited_once_with(request, KEY, KG, known_user_id="user-123")
+
+  async def test_a_failed_access_check_is_still_charged(self):
+    charge = AsyncMock()
+    with (
+      patch.object(
+        catalog,
+        "authorize_api_key_on_graph",
+        AsyncMock(side_effect=HTTPException(status_code=503, detail="down")),
+      ),
+      patch.object(catalog, "_charge", charge),
+      pytest.raises(HTTPException) as exc,
+    ):
+      await _dispatch(_call(GET_TOOLS, {"graph": KG}))
+    assert exc.value.status_code == 503
+    charge.assert_awaited_once()
 
 
 @pytest.mark.asyncio
@@ -466,12 +481,15 @@ class TestCallTool:
     assert CALL_READ_TOOL in _text(response)
     gate.tools_call.assert_not_awaited()
 
-  async def test_an_unknown_tool_is_not_called(self):
-    for tool in (CALL_READ_TOOL, CALL_WRITE_TOOL):
-      with _Gate() as gate:
-        response = await _dispatch(_call(tool, {"graph": KG, "name": "no-such-tool"}))
-      assert "no tool named" in _text(response)
+  async def test_a_name_no_table_lists_is_a_write_the_graph_answers_for(self):
+    with _Gate() as gate:
+      response = await _dispatch(
+        _call(CALL_READ_TOOL, {"graph": KG, "name": "no-such-tool"})
+      )
+      assert CALL_WRITE_TOOL in _text(response)
       gate.tools_call.assert_not_awaited()
+      await _dispatch(_call(CALL_WRITE_TOOL, {"graph": KG, "name": "no-such-tool"}))
+      gate.tools_call.assert_awaited_once()
 
   async def test_a_missing_tool_name_is_refused(self):
     with _Gate() as gate:
@@ -626,6 +644,18 @@ class TestRouteCredential:
       await dependencies.authorize_api_key_on_graph(request, KEY, KG)
     assert exc.value.status_code == 403
     assert not hasattr(request.state, "auth_graph_id")
+
+    # A key this request already validated: the refusal is a denied graph.
+    with (
+      patch.object(dependencies, "validate_api_key_with_graph", return_value=None),
+      patch.object(dependencies, "SecurityAuditLogger") as audit,
+      pytest.raises(HTTPException),
+    ):
+      await dependencies.authorize_api_key_on_graph(
+        request, KEY, KG, known_user_id="user-123"
+      )
+    audit.log_authorization_denied.assert_called_once()
+    audit.log_security_event.assert_not_called()
 
     user = _user()
     with (

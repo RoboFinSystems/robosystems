@@ -507,12 +507,16 @@ async def authorize_api_key_on_graph(
   graph_id: str,
   *,
   allow_deprovisioned: bool = False,
+  known_user_id: str | None = None,
 ) -> User:
   """Confirm an API key reaches ``graph_id`` and return its user, else 403.
 
   The key branch of ``_resolve_user_with_graph``, and the per-call check of
   the multi-graph MCP route, whose graph arrives in the request body. Only
   the key is read: a bearer token on the same request is ignored.
+
+  ``known_user_id`` says the key was already validated for that user on this
+  request, so a refusal is audited as a denied graph, not as a bad key.
   """
   user = await asyncio.to_thread(
     validate_api_key_with_graph,
@@ -533,17 +537,26 @@ async def authorize_api_key_on_graph(
     _publish_graph_authorization(request, graph_id)
     return user
 
-  SecurityAuditLogger.log_security_event(
-    event_type=SecurityEventType.API_KEY_INVALID,
-    ip_address=client_ip,
-    user_agent=user_agent,
-    endpoint=str(request.url.path),
-    details={
-      "api_key_prefix": api_key[:8] if api_key else "",
-      "graph_id": graph_id,
-    },
-    risk_level="high",
-  )
+  if known_user_id is not None:
+    SecurityAuditLogger.log_authorization_denied(
+      user_id=known_user_id,
+      resource=f"graph_database:{graph_id}",
+      action="access",
+      ip_address=client_ip,
+      endpoint=str(request.url.path),
+    )
+  else:
+    SecurityAuditLogger.log_security_event(
+      event_type=SecurityEventType.API_KEY_INVALID,
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint=str(request.url.path),
+      details={
+        "api_key_prefix": api_key[:8] if api_key else "",
+        "graph_id": graph_id,
+      },
+      risk_level="high",
+    )
   raise HTTPException(
     status_code=status.HTTP_403_FORBIDDEN,
     detail="Invalid API key or access denied to graph",
