@@ -309,6 +309,29 @@ class TestLadybugClientExtended:
       assert len(result) == 2
       assert result[0]["name"] == "Person"
 
+  @pytest.mark.asyncio
+  async def test_get_schema_reads_the_graph_the_factory_was_asked_for(self, client):
+    """A client the factory made for a graph never reads `sec` in its place."""
+    client._graph_id = "kg123_dev"
+    client._database_name = "kg123_dev"
+    mock_response = Mock(spec=httpx.Response)
+    mock_response.status_code = 200
+    mock_response.json.return_value = {"tables": []}
+
+    with patch.object(client.client, "request", return_value=mock_response) as request:
+      await client.get_schema()
+
+    assert "/databases/kg123_dev/schema" in str(request.call_args)
+
+  def test_the_bound_database_falls_back_to_sec_only_when_unbound(self, client):
+    assert client._bound_database() == "sec"
+    client._graph_id = "kg123"
+    assert client._bound_database() == "kg123"
+    client.graph_id = "kg456"
+    assert client._bound_database() == "kg456"
+    client._database_name = "kg456_dev"
+    assert client._bound_database() == "kg456_dev"
+
   # Test install_schema method
   @pytest.mark.asyncio
   async def test_install_schema(self, client):
