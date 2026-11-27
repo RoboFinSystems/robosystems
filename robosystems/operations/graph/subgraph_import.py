@@ -141,6 +141,9 @@ async def run_import(
   client = await GraphClientFactory.create_client(
     graph_id=graph_id, operation_type="write"
   )
+  # The factory routes to the graph's writer but leaves the client unbound,
+  # and get_schema reads the bound graph (falling back to `sec`).
+  client.graph_id = graph_id
   results: list[dict[str, Any]] = []
   try:
     ordered, missing = _order_nodes_first(names, await client.get_schema())

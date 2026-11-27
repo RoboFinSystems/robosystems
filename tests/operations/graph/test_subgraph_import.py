@@ -25,7 +25,14 @@ SCHEMA = [
 @pytest.fixture
 def graph_client():
   client = MagicMock()
-  client.get_schema = AsyncMock(return_value=SCHEMA)
+  client.graph_id = None
+
+  async def get_schema():
+    # The real client reads the graph it is bound to, and `sec` when unbound.
+    assert client.graph_id == GRAPH, f"schema read from {client.graph_id or 'sec'}"
+    return SCHEMA
+
+  client.get_schema = AsyncMock(side_effect=get_schema)
   client.create_table = AsyncMock(return_value={"status": "completed"})
   client.materialize_table = AsyncMock(return_value={"rows_ingested": 7})
   client.delete_table = AsyncMock(return_value={})
