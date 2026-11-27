@@ -233,8 +233,8 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
   names evicted.
 
   Subgraphs are the ones whose name carries an underscore
-  (``parent_subgraph``). The target graph and anything with live connections
-  are left alone.
+  (``parent_subgraph``). The target graph and any database with a query in
+  flight are left alone; a connection merely held in the pool does not count.
   """
   evicted = []
   for db_name in pool.list_databases():
@@ -243,16 +243,9 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
       continue
     if "_" not in db_name:
       continue
-    if pool.has_active_connections(db_name):
-      continue
     try:
-      pool.close_database_connections(db_name)
-      if not pool.has_active_connections(db_name):
+      if pool.close_if_idle(db_name):
         evicted.append(db_name)
-      else:
-        logger.warning(
-          f"Database {db_name} still has connections after eviction attempt"
-        )
     except Exception as e:
       logger.warning(f"Failed to evict idle database {db_name}: {e}")
   return evicted
@@ -264,7 +257,7 @@ def reopen_sibling_subgraphs(pool, changed_graph_id: str) -> list[str]:
   Subgraphs share a memory budget, so each one's buffer pool depends on how
   many exist, and a pool's size is fixed when its database opens. Closing the
   idle ones makes them reopen at the new share. One with a query in flight
-  keeps its size until it next goes idle. Does nothing for a parent graph.
+  keeps its size until it is next reopened. Does nothing for a parent graph.
   """
   if "_" not in changed_graph_id:
     return []

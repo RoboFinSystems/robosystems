@@ -97,13 +97,13 @@ class TestEvictIdleSubgraphDatabases:
       "sec_historical",
       "sec_quarterly",
     ]
-    mock_pool.has_active_connections.return_value = False
+    mock_pool.close_if_idle.return_value = True
 
     evicted = _evict_idle_subgraph_databases(mock_pool, target_graph_id="sec")
 
-    assert "sec_historical" in evicted
-    assert "sec_quarterly" in evicted
-    assert "sec" not in evicted
+    assert evicted == ["sec_historical", "sec_quarterly"]
+    closed = [c.args[0] for c in mock_pool.close_if_idle.call_args_list]
+    assert "sec" not in closed
 
   def test_skips_target_graph(self):
     """The target graph is never evicted even if it looks like a subgraph."""
@@ -117,17 +117,16 @@ class TestEvictIdleSubgraphDatabases:
       "sec_historical",
       "sec_quarterly",
     ]
-    mock_pool.has_active_connections.return_value = False
+    mock_pool.close_if_idle.return_value = True
 
     evicted = _evict_idle_subgraph_databases(
       mock_pool, target_graph_id="sec_historical"
     )
 
-    assert "sec_historical" not in evicted
-    assert "sec_quarterly" in evicted
+    assert evicted == ["sec_quarterly"]
 
-  def test_skips_active_connections(self):
-    """Subgraphs with active connections are not evicted."""
+  def test_skips_a_database_with_a_query_in_flight(self):
+    """A subgraph the pool will not close (a connection is checked out) stays."""
     from robosystems.graph_api.core.memory_manager import (
       _evict_idle_subgraph_databases,
     )
@@ -138,12 +137,11 @@ class TestEvictIdleSubgraphDatabases:
       "sec_historical",
       "sec_quarterly",
     ]
-    mock_pool.has_active_connections.side_effect = lambda db: db == "sec_historical"
+    mock_pool.close_if_idle.side_effect = lambda db: db != "sec_historical"
 
     evicted = _evict_idle_subgraph_databases(mock_pool, target_graph_id="sec")
 
-    assert "sec_historical" not in evicted
-    assert "sec_quarterly" in evicted
+    assert evicted == ["sec_quarterly"]
 
   def test_skips_non_subgraph_databases(self):
     """Databases without underscores are not evicted."""
@@ -153,37 +151,21 @@ class TestEvictIdleSubgraphDatabases:
 
     mock_pool = MagicMock()
     mock_pool.list_databases.return_value = ["sec", "kg123", "industry"]
-    mock_pool.has_active_connections.return_value = False
 
     evicted = _evict_idle_subgraph_databases(mock_pool, target_graph_id="sec")
 
     assert evicted == []
+    mock_pool.close_if_idle.assert_not_called()
 
   def test_handles_close_error_gracefully(self):
-    """Errors during close_database_connections are handled."""
+    """Errors while closing are logged, not raised."""
     from robosystems.graph_api.core.memory_manager import (
       _evict_idle_subgraph_databases,
     )
 
     mock_pool = MagicMock()
     mock_pool.list_databases.return_value = ["sec_historical"]
-    mock_pool.has_active_connections.return_value = False
-    mock_pool.close_database_connections.side_effect = RuntimeError("close failed")
-
-    evicted = _evict_idle_subgraph_databases(mock_pool, target_graph_id="sec")
-
-    assert evicted == []
-
-  def test_database_still_active_after_eviction_attempt(self):
-    """Database with connections after eviction attempt is not counted."""
-    from robosystems.graph_api.core.memory_manager import (
-      _evict_idle_subgraph_databases,
-    )
-
-    mock_pool = MagicMock()
-    mock_pool.list_databases.return_value = ["sec_historical"]
-    # First call returns False (no active), second returns True (still active after close)
-    mock_pool.has_active_connections.side_effect = [False, True]
+    mock_pool.close_if_idle.side_effect = RuntimeError("close failed")
 
     evicted = _evict_idle_subgraph_databases(mock_pool, target_graph_id="sec")
 
@@ -477,7 +459,7 @@ class TestBoostLadybugMemoryContextManager:
 
     mock_pool = MagicMock()
     mock_pool.list_databases.return_value = ["sec_historical", "sec_quarterly"]
-    mock_pool.has_active_connections.return_value = False
+    mock_pool.close_if_idle.return_value = True
 
     with (
       patch(f"{MODULE}.env") as mock_env,
@@ -498,8 +480,8 @@ class TestBoostLadybugMemoryContextManager:
       with boost_ladybug_memory("sec") as boost:
         assert boost == 50000
 
-      # Should have called close_database_connections for subgraphs
-      assert mock_pool.close_database_connections.call_count >= 1
+      # Should have closed the idle subgraphs
+      assert mock_pool.close_if_idle.call_count >= 1
 
   def test_duckdb_release_error_is_caught(self):
     """Error releasing DuckDB memory before boost does not block."""

@@ -89,9 +89,7 @@ class TestReopen:
     pool = MagicMock()
     pool.list_databases.return_value = ["kg1", "kg1_a", "kg1_b", "kg1_new"]
     busy = {"kg1_b"}
-    closed: set[str] = set()
-    pool.has_active_connections.side_effect = lambda n: n in busy and n not in closed
-    pool.close_database_connections.side_effect = closed.add
+    pool.close_if_idle.side_effect = lambda n: n not in busy
 
     assert reopen_sibling_subgraphs(pool, "kg1_new") == ["kg1_a"]
 
