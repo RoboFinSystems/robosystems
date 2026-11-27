@@ -157,16 +157,32 @@ Resources:
                         Type: URL_DECODE
                       - Priority: 1
                         Type: HTML_ENTITY_DECODE
-                # Cross-site scripting - Request Body
-                - XssMatchStatement:
-                    FieldToMatch:
-                      Body:
-                        OversizeHandling: CONTINUE
-                    TextTransformations:
-                      - Priority: 0
-                        Type: URL_DECODE
-                      - Priority: 1
-                        Type: HTML_ENTITY_DECODE
+                # Cross-site scripting - Request Body, everywhere except the MCP
+                # endpoints. A path ending in /mcp carries JSON-RPC whose string
+                # values are text a client stores (notes, summaries, markdown),
+                # and the API answers JSON and renders none of it, so a markup
+                # signature there only rejects prose.
+                - AndStatement:
+                    Statements:
+                      - NotStatement:
+                          Statement:
+                            ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: ENDS_WITH
+                              SearchString: /mcp
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                      - XssMatchStatement:
+                          FieldToMatch:
+                            Body:
+                              OversizeHandling: CONTINUE
+                          TextTransformations:
+                            - Priority: 0
+                              Type: URL_DECODE
+                            - Priority: 1
+                              Type: HTML_ENTITY_DECODE
                 # Cross-site scripting - URI Path
                 - XssMatchStatement:
                     FieldToMatch:
@@ -309,6 +325,7 @@ Resources:
                   - Name: SizeRestrictions_BODY # Already handled by our custom rule
                   - Name: SizeRestrictions_QUERYSTRING # Can block legitimate queries
                   - Name: GenericRFI_BODY # Can cause false positives with JSON payloads
+                  - Name: GenericLFI_BODY # Blocks any JSON text holding a relative path (../), such as prose written through MCP
                   - Name: GenericRFI_QUERYARGUMENTS # Can block legitimate query parameters
                   - Name: GenericRFI_URIPATH # Can block legitimate API paths
                   - Name: RestrictedExtensions_URIPATH # Can block legitimate API endpoints
