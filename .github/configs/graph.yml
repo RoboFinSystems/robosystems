@@ -55,7 +55,8 @@ production:
         # headroom for the OS and the API container.
         max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
         memory_per_db_mb: 1024 # 1GB for the parent database
-        memory_per_subgraph_mb: 384 # 384MB per subgraph (3 max, rarely all active)
+        subgraph_memory_budget_mb: 1024 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 1024, 3 get 341 each)
+        subgraph_memory_min_mb: 256 # A subgraph never opens with less than this, even past the budget
 
         # LadybugDB-specific performance settings
         chunk_size: 500 # Batch operation chunk size
@@ -118,7 +119,8 @@ production:
         # (2048 + 10x384 = 5.9GB nominal) since they are rarely all active.
         max_memory_mb: 6144 # 6GB available (8GB - 2GB OS/container overhead)
         memory_per_db_mb: 2048 # 2GB for the parent database
-        memory_per_subgraph_mb: 384 # 384MB per subgraph (10 max)
+        subgraph_memory_budget_mb: 2048 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 2048, 8 get 256 each)
+        subgraph_memory_min_mb: 256 # A subgraph never opens with less than this, even past the budget
 
         # LadybugDB-specific performance settings
         chunk_size: 1000 # Larger chunks for better performance
@@ -182,7 +184,8 @@ production:
         # (8192 + 25x1024 = 33.8GB nominal) since they are rarely all active.
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
         memory_per_db_mb: 8192 # 8GB for the parent database
-        memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
+        subgraph_memory_budget_mb: 14336 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 8192, 25 get 573 each)
+        subgraph_memory_min_mb: 512 # A subgraph never opens with less than this, even past the budget
 
         # LadybugDB-specific performance settings
         chunk_size: 2000 # Maximum chunk size for best performance
@@ -332,7 +335,8 @@ staging:
         instance_ram_gb: 4
         max_memory_mb: 3072 # 3GB available (4GB - 1GB OS/container overhead)
         memory_per_db_mb: 1024 # 1GB for the parent database
-        memory_per_subgraph_mb: 384 # 384MB per subgraph (3 max)
+        subgraph_memory_budget_mb: 1024 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 1024, 3 get 341 each)
+        subgraph_memory_min_mb: 256 # A subgraph never opens with less than this, even past the budget
         chunk_size: 500
         query_timeout: 45
         max_query_length: 10000
@@ -382,7 +386,8 @@ staging:
         instance_ram_gb: 8
         max_memory_mb: 6144 # 6GB available (8GB - 2GB OS/container overhead)
         memory_per_db_mb: 2048 # 2GB for the parent database
-        memory_per_subgraph_mb: 384 # 384MB per subgraph (10 max)
+        subgraph_memory_budget_mb: 2048 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 2048, 8 get 256 each)
+        subgraph_memory_min_mb: 256 # A subgraph never opens with less than this, even past the budget
         chunk_size: 1000
         query_timeout: 60
         max_query_length: 25000
@@ -432,7 +437,8 @@ staging:
         instance_ram_gb: 32
         max_memory_mb: 30720 # 30GB available (32GB - 2GB OS overhead)
         memory_per_db_mb: 8192 # 8GB for the parent database
-        memory_per_subgraph_mb: 1024 # 1GB per subgraph (25 max)
+        subgraph_memory_budget_mb: 14336 # Shared by the subgraphs that exist: max_memory_mb - parent - DuckDB staging (1 gets 8192, 25 get 573 each)
+        subgraph_memory_min_mb: 512 # A subgraph never opens with less than this, even past the budget
         chunk_size: 2000
         query_timeout: 120
         max_query_length: 50000
@@ -547,7 +553,8 @@ development:
         instance_ram_gb: 4
         max_memory_mb: 3072
         memory_per_db_mb: 1024
-        memory_per_subgraph_mb: 384
+        subgraph_memory_budget_mb: 1024 # Matches production standard
+        subgraph_memory_min_mb: 256 # A subgraph never opens with less than this, even past the budget
         chunk_size: 500
         query_timeout: 45
         max_query_length: 10000

@@ -230,6 +230,8 @@ class LadybugDatabaseManager:
       elif request.schema_type == "shared" and request.repository_name:
         self._register_shared_repository(request.graph_id)
 
+      self._reopen_sibling_subgraphs(request.graph_id)
+
       return DatabaseCreateResponse(
         status="success",
         graph_id=request.graph_id,
@@ -256,6 +258,15 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Database creation failed: {e!s}",
       )
+
+  def _reopen_sibling_subgraphs(self, graph_id: str) -> None:
+    """A subgraph came or went, so the others' share of memory changed."""
+    try:
+      from robosystems.graph_api.core.memory_manager import reopen_sibling_subgraphs
+
+      reopen_sibling_subgraphs(self.connection_pool, graph_id)
+    except Exception as e:
+      logger.warning(f"Could not reopen sibling subgraphs of {graph_id}: {e}")
 
   def delete_database(
     self, graph_id: str, preserve_duckdb: bool = False
@@ -332,6 +343,8 @@ class LadybugDatabaseManager:
           failed.append(f"duckdb: {duck_err}")
       else:
         logger.info(f"Preserving DuckDB staging database for {graph_id}")
+
+      self._reopen_sibling_subgraphs(graph_id)
 
       if existed:
         message = f"Database {graph_id} deleted successfully"
