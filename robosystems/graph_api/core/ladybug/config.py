@@ -55,11 +55,56 @@ def get_ladybug_memory_override(graph_id: str | None = None) -> int | None:
   return next(iter(_memory_overrides.values()), None) if _memory_overrides else None
 
 
+def subgraph_share_mb(tier_config: dict, subgraph_count: int) -> int | None:
+  """One subgraph's buffer pool when the tier shares a budget among them.
+
+  The budget is divided by the subgraphs that exist, so a lone subgraph gets
+  room a full set could not each have. No share exceeds the parent's own pool
+  or falls under the tier's minimum; at the minimum the tier is oversubscribed,
+  which holds because a pool is a ceiling the engine grows into, not a
+  reservation. None when the tier names no budget.
+  """
+  budget = int(tier_config.get("subgraph_memory_budget_mb", 0) or 0)
+  if budget <= 0:
+    return None
+  share = budget // max(1, subgraph_count)
+  ceiling = int(tier_config.get("memory_per_db_mb", 0) or 0)
+  if ceiling > 0:
+    share = min(share, ceiling)
+  return max(share, int(tier_config.get("subgraph_memory_min_mb", 0) or 0))
+
+
+def count_subgraph_databases(database_name: str) -> int:
+  """The subgraph databases on this node, counting ``database_name`` whether or
+  not its file exists yet (it is sized as it is created).
+
+  A subgraph is a name with an underscore, the rule the rest of this package
+  uses. Every one on the node counts against the one budget, which is right
+  for the tiers that set a budget: they hold a single parent.
+  """
+  from pathlib import Path
+
+  from robosystems.config.storage.graph import split_graph_db_filename
+
+  names = {database_name}
+  try:
+    for item in Path(env.LBUG_DATABASE_PATH).iterdir():
+      if not item.is_file():
+        continue
+      name = split_graph_db_filename(item.name)
+      if name and "_" in name and not name.endswith(("-wip", "-prev")):
+        names.add(name)
+  except OSError as e:
+    logger.warning(f"Could not count subgraph databases: {e}")
+  return len(names)
+
+
 def get_database_memory_config(database_name: str | None = None) -> int:
   """Get the buffer pool size in MB for a database, in priority order.
 
   1. That database's memory override, if one is set
-  2. ``memory_per_subgraph_mb``, when the name is a subgraph
+  2. A share of ``subgraph_memory_budget_mb`` (or the fixed
+     ``memory_per_subgraph_mb``), when the name is a subgraph
   3. ``memory_per_db_mb``, for parent databases
   4. ``lbug_max_memory_mb`` / ``max_memory_mb``, for single-database instances
 
@@ -82,6 +127,13 @@ def get_database_memory_config(database_name: str | None = None) -> int:
 
   is_subgraph = database_name is not None and "_" in database_name
   if is_subgraph:
+    shared_mb = subgraph_share_mb(tier_config, count_subgraph_databases(database_name))
+    if shared_mb:
+      logger.info(
+        f"Using subgraph memory share: {shared_mb} MB (for '{database_name}')"
+      )
+      return shared_mb
+
     memory_per_subgraph_mb = tier_config.get("memory_per_subgraph_mb", 0)
     if memory_per_subgraph_mb > 0:
       logger.info(

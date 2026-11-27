@@ -141,7 +141,11 @@ class CreateSubgraphTool:
           },
           "description": {
             "type": "string",
-            "description": "Optional description.",
+            "maxLength": 500,
+            "description": (
+              "Optional description of the subgraph's purpose (up to 500 "
+              "characters). The subgraph is listed under its name."
+            ),
           },
           "fork_parent": {
             "type": "boolean",
@@ -163,7 +167,7 @@ class CreateSubgraphTool:
     from robosystems.operations.graph.subgraph_service import SubgraphService
 
     name = arguments.get("name") or ""
-    description = arguments.get("description") or f"MCP subgraph: {name}"
+    description = arguments.get("description") or None
     fork_parent = bool(arguments.get("fork_parent", False))
     subgraph_type = arguments.get("subgraph_type", "static")
 
@@ -178,6 +182,11 @@ class CreateSubgraphTool:
           "(no hyphens or underscores)."
         ),
         "valid_examples": ["dev", "staging", "test1"],
+      }
+    if description is not None and len(description) > 500:
+      return {
+        "error": "invalid_description",
+        "message": "Description must be 500 characters or fewer.",
       }
 
     user = _require_user(self.client)

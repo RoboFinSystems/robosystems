@@ -77,9 +77,13 @@ Each database gets a fixed buffer-pool budget in megabytes, resolved by
 
 1. A per-database override set by `set_ladybug_memory_override` (used during
    materialization).
-2. `memory_per_subgraph_mb` if the name contains an underscore — subgraphs are
-   identified structurally (`kg123_dev`, `sec_historical`) and get a smaller
-   pool, deliberately oversubscribed because they are rarely all hot at once.
+2. A subgraph's share, if the name contains an underscore — subgraphs are
+   identified structurally (`kg123_dev`, `sec_historical`). Where the tier
+   sets `subgraph_memory_budget_mb`, the budget is divided by the subgraphs
+   that exist on the node, capped at the parent's pool and never under
+   `subgraph_memory_min_mb`; creating or deleting a subgraph closes the idle
+   ones so they reopen at the new share. A tier without a budget uses the
+   fixed `memory_per_subgraph_mb`.
 3. `memory_per_db_mb` for a parent database.
 4. The tier's total `max_memory_mb` for single-database instances.
 5. `LBUG_MAX_MEMORY_MB` (default 2048) as the local-dev fallback.

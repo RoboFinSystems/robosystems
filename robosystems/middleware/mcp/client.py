@@ -26,6 +26,13 @@ from .exceptions import (
 if TYPE_CHECKING:
   from robosystems.schemas.models import Node, Relationship
 
+# The Graph API's refusals of an oversized request, which pass through as written.
+_REQUEST_LIMIT_ERROR = re.compile(
+  r"Too many parameters \(max \d+\)"
+  r"|Parameter '[\w.]+' (?:value too long|array too large|array total size too large"
+  r"|object too large|numeric value out of bounds)(?: \([^)]*\))?"
+)
+
 # The engine's words for a query it rejected: the caller's mistake.
 _CALLER_QUERY_ERROR_PATTERNS = (
   "Parser exception",
@@ -697,6 +704,12 @@ class GraphMCPClient:
   ) -> str:
     """Strip internal details; query errors pass through outside production."""
     error_str = str(error)
+
+    # A limit on the caller's own request says nothing about the schema, and
+    # without it a refused batch cannot be told from a broken query.
+    limit = _REQUEST_LIMIT_ERROR.search(error_str)
+    if limit:
+      return f"{limit.group(0)}. Send fewer or smaller values in one call."
 
     from robosystems.config import env
 

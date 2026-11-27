@@ -245,6 +245,7 @@ class SubgraphService:
     parent_graph: Graph,
     user: User,
     name: str,
+    display_name: str | None = None,
     description: str | None = None,
     subgraph_type: str = "static",
     metadata: dict | None = None,
@@ -258,6 +259,8 @@ class SubgraphService:
     base, "empty" installs nothing, anything else inherits the parent's
     extensions on base. A failed metadata write deletes the new database; a
     failed ``fork_parent`` does not, and is reported in ``fork_status``.
+    ``display_name`` defaults to ``name``; ``description`` is kept in the
+    subgraph metadata, never shown as the name.
     """
     from ...database import SessionFactory
     from ...models.core.graph import Graph
@@ -313,11 +316,13 @@ class SubgraphService:
       subgraph_metadata = (metadata or {}).copy()
       if "subgraph_type" not in subgraph_metadata:
         subgraph_metadata["subgraph_type"] = subgraph_type
+      if description and "description" not in subgraph_metadata:
+        subgraph_metadata["description"] = description
 
       subgraph = Graph(
         graph_id=subgraph_id,
         org_id=parent_graph.org_id,
-        graph_name=description or name,
+        graph_name=display_name or name,
         graph_type=parent_graph.graph_type,
         base_schema=parent_graph.base_schema,
         schema_extensions=parent_graph.schema_extensions or [],

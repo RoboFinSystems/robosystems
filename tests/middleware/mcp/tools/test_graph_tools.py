@@ -272,6 +272,36 @@ class TestCreateSubgraphExecute:
     call_kwargs = mock_svc.create_subgraph.call_args.kwargs
     assert call_kwargs["parent_graph"] is parent
     assert call_kwargs["fork_parent"] is True
+    # No display name from this tool: the subgraph is listed under its name.
+    assert "display_name" not in call_kwargs
+    assert call_kwargs["description"] is None
+
+  @pytest.mark.asyncio
+  async def test_description_passed_as_description(self, mock_db: MagicMock) -> None:
+    with (
+      self._gates(MagicMock()),
+      patch(
+        "robosystems.operations.graph.subgraph_service.SubgraphService"
+      ) as mock_svc_class,
+    ):
+      mock_svc = AsyncMock()
+      mock_svc.create_subgraph.return_value = {"graph_id": f"{GRAPH_ID}_dev"}
+      mock_svc_class.return_value = mock_svc
+
+      await CreateSubgraphTool(_client()).execute(
+        {"name": "dev", "description": "Scratch space for the import"}
+      )
+
+    call_kwargs = mock_svc.create_subgraph.call_args.kwargs
+    assert call_kwargs["description"] == "Scratch space for the import"
+    assert "display_name" not in call_kwargs
+
+  @pytest.mark.asyncio
+  async def test_overlong_description_rejected(self) -> None:
+    result = await CreateSubgraphTool(_client()).execute(
+      {"name": "dev", "description": "x" * 501}
+    )
+    assert result["error"] == "invalid_description"
 
 
 # ══════════════════════════════════════════════════════════════════════════

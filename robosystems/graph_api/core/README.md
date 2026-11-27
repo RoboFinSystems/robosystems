@@ -92,8 +92,8 @@ Isolation is filesystem-level, not row-level. Each graph is one `.lbdb` file
 under `LBUG_DATABASE_PATH` and one `.duckdb` file under `DUCKDB_STAGING_PATH`,
 with its own pool entry and its own memory budget. Subgraphs are separate
 database files on the same instance, named `{parent}_{name}` — the underscore is
-load-bearing, since `get_database_memory_config` uses it to hand subgraphs the
-smaller `memory_per_subgraph_mb` budget. Path construction goes through
+load-bearing, since `get_database_memory_config` uses it to hand subgraphs
+their share of the tier's `subgraph_memory_budget_mb`. Path construction goes through
 `validate_database_path` and `get_duckdb_staging_path` so a graph ID can never
 escape its base directory.
 

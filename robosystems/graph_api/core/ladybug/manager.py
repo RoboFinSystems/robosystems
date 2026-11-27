@@ -40,7 +40,7 @@ from robosystems.security.cypher_analyzer import (
   is_non_read_call,
 )
 
-from .pool import initialize_connection_pool
+from .pool import checkpoint_threshold_for, initialize_connection_pool
 
 # Transient databases the blue-green materialization swap builds alongside a
 # live graph. Never primaries, so they neither consume nor are charged a slot.
@@ -170,15 +170,8 @@ class LadybugDatabaseManager:
       max_memory_mb = get_database_memory_config(request.graph_id)
       buffer_pool_size = max_memory_mb * 1024 * 1024
 
-      # SEC's Fact and Association tables are large enough that the default
-      # threshold lets the WAL grow until it exhausts memory; checkpointing
-      # more often keeps it bounded.
       database_name = request.graph_id
-      if database_name == "sec":
-        checkpoint_threshold = 134217728
-        logger.info("Using reduced checkpoint threshold (128MB) for SEC database")
-      else:
-        checkpoint_threshold = 536870912
+      checkpoint_threshold = checkpoint_threshold_for(database_name, buffer_pool_size)
 
       db = lbug.Database(
         str(db_path),
@@ -237,6 +230,8 @@ class LadybugDatabaseManager:
       elif request.schema_type == "shared" and request.repository_name:
         self._register_shared_repository(request.graph_id)
 
+      self._reopen_sibling_subgraphs(request.graph_id)
+
       return DatabaseCreateResponse(
         status="success",
         graph_id=request.graph_id,
@@ -263,6 +258,15 @@ class LadybugDatabaseManager:
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail=f"Database creation failed: {e!s}",
       )
+
+  def _reopen_sibling_subgraphs(self, graph_id: str) -> None:
+    """A subgraph came or went, so the others' share of memory changed."""
+    try:
+      from robosystems.graph_api.core.memory_manager import reopen_sibling_subgraphs
+
+      reopen_sibling_subgraphs(self.connection_pool, graph_id)
+    except Exception as e:
+      logger.warning(f"Could not reopen sibling subgraphs of {graph_id}: {e}")
 
   def delete_database(
     self, graph_id: str, preserve_duckdb: bool = False
@@ -339,6 +343,8 @@ class LadybugDatabaseManager:
           failed.append(f"duckdb: {duck_err}")
       else:
         logger.info(f"Preserving DuckDB staging database for {graph_id}")
+
+      self._reopen_sibling_subgraphs(graph_id)
 
       if existed:
         message = f"Database {graph_id} deleted successfully"

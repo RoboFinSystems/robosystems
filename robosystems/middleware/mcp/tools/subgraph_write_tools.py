@@ -109,6 +109,11 @@ class WriteCypherTool(BaseTool):
         "**RETURNS:** `success`, plus `result` — the rows the query itself "
         "RETURNs, which is empty for a bare CREATE or SET. There is no "
         "affected-row count; to confirm a write, RETURN what you wrote.\n\n"
+        "**NOTES:** Built for crafting a graph a statement at a time. Many "
+        "rows go in one call as a list parameter (`UNWIND $rows AS r MERGE "
+        "...`): at most 1,000 items and 50,000 characters across them, and "
+        "10,000 characters in any one string. Past a few hundred rows, or for "
+        "long text, use create-table-import instead.\n\n"
         "**Examples:**\n"
         "```cypher\n"
         "// Create a node\n"
@@ -433,3 +438,157 @@ class AddRelationshipTableTool(BaseTool):
         extra={"table_name": table_name, "ddl": ddl, "error_type": type(e).__name__},
       )
       raise GraphAPIError(f"Failed to create relationship table '{table_name}': {e}")
+
+
+def _import_user_id(client) -> str | None:
+  user = getattr(client, "user", None)
+  return str(user.id) if user is not None else None
+
+
+_NO_USER = {
+  "error": "authentication_required",
+  "message": "User context required for this operation.",
+}
+
+_IMPORT_TABLES_SCHEMA = {
+  "type": "array",
+  "items": {"type": "string"},
+  "minItems": 1,
+  "description": "Names of tables that exist in this subgraph's schema",
+}
+
+
+class CreateTableImportTool(BaseTool):
+  """Presign Parquet uploads for a bulk import into a subgraph's tables."""
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "create-table-import",
+      "description": (
+        "Start a bulk import: get one upload URL per table, for a Parquet file "
+        "of rows to add to that table.\n\n"
+        "**WHEN TO USE:**\n"
+        "- To load more rows than write-graph-cypher is comfortable with "
+        "(hundreds or more), or rows carrying long text\n"
+        "- You can run shell commands, so you can write Parquet files and PUT "
+        "them. Without a shell, use write-graph-cypher\n\n"
+        "**WORKFLOW:**\n"
+        "1. Create the tables first (add-node-table, add-relationship-table).\n"
+        "2. Call this with the table names.\n"
+        "3. PUT one Parquet file to each `upload_url` with the returned "
+        "`content_type` header. The bytes go straight to storage, not through "
+        "this connection.\n"
+        "4. Call run-table-import with the `import_id` and the table names.\n\n"
+        "**PARAMETERS:** each file has columns named as the table's properties. A node "
+        "table's file must carry its primary key column, named `identifier`. A "
+        "relationship table's file carries `from` and `to` (the two nodes' "
+        "`identifier` values), then its properties.\n\n"
+        "**RETURNS:** `import_id`, `content_type`, `expires_in`, and `uploads` "
+        "(`table_name`, `upload_url`). Nothing is recorded until "
+        "run-table-import; an import never run expires with its files."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {"tables": _IMPORT_TABLES_SCHEMA},
+        "required": ["tables"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.operations.graph.subgraph_import import (
+      SubgraphImportError,
+      begin_import,
+    )
+
+    self._log_tool_execution("create-table-import", arguments)
+
+    error = _validate_subgraph_context(self.client.graph_id)
+    if error:
+      return error
+    user_id = _import_user_id(self.client)
+    if user_id is None:
+      return _NO_USER
+
+    try:
+      result = begin_import(
+        graph_id=self.client.graph_id,
+        user_id=user_id,
+        tables=arguments.get("tables") or [],
+      )
+    except SubgraphImportError as e:
+      return {"error": "invalid_input", "message": str(e)}
+    result["next"] = (
+      "PUT a Parquet file to each upload_url with the Content-Type header set "
+      "to content_type, then call run-table-import with import_id and tables."
+    )
+    return result
+
+
+class RunTableImportTool(BaseTool):
+  """Copy the uploaded Parquet files into the subgraph's tables."""
+
+  def get_tool_definition(self) -> dict[str, Any]:
+    return {
+      "name": "run-table-import",
+      "description": (
+        "Run a bulk import started with create-table-import: add each "
+        "uploaded file's rows to its table, node tables before relationship "
+        "tables.\n\n"
+        "**WHEN TO USE:**\n"
+        "- After every file of a create-table-import has been PUT\n"
+        "- Again, with `remaining`, while the result says `done` is false\n\n"
+        "**RETURNS:** `tables` (per table: `status` and `rows_ingested`), the "
+        "total `rows_ingested`, and `remaining` — the tables a single call did "
+        "not reach. While `done` is false, call again with `tables` set to "
+        "`remaining`.\n\n"
+        "**NOTES:** Rows are added, never replaced: a node whose `identifier` "
+        "is already in the table is skipped, and so is a relationship between "
+        "two nodes that already have one in that table, so repeating a table "
+        "is safe. A table once started is finished, so send a very large "
+        "file in a call of its own. A relationship row whose `from` or `to` node does not exist "
+        "fails that table's copy. A table's `status` is `imported`, "
+        "`not_uploaded`, `no_such_table` or `failed` (with `stage` and "
+        "`message`)."
+      ),
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "import_id": {
+            "type": "string",
+            "description": "The import_id create-table-import returned",
+          },
+          "tables": _IMPORT_TABLES_SCHEMA,
+        },
+        "required": ["import_id", "tables"],
+        "additionalProperties": False,
+      },
+    }
+
+  async def execute(self, arguments: dict[str, Any]) -> dict[str, Any]:
+    from robosystems.operations.graph.subgraph_import import (
+      SubgraphImportError,
+      run_import,
+    )
+
+    self._log_tool_execution("run-table-import", arguments)
+
+    error = _validate_subgraph_context(self.client.graph_id)
+    if error:
+      return error
+    user_id = _import_user_id(self.client)
+    if user_id is None:
+      return _NO_USER
+
+    try:
+      return await run_import(
+        graph_id=self.client.graph_id,
+        user_id=user_id,
+        import_id=str(arguments.get("import_id") or ""),
+        tables=arguments.get("tables") or [],
+      )
+    except SubgraphImportError as e:
+      return {"error": "invalid_input", "message": str(e)}
+    except Exception as e:
+      logger.error(f"Table import failed: {e}")
+      raise GraphAPIError(f"Table import failed: {e}")

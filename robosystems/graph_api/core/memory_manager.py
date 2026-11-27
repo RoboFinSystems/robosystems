@@ -258,6 +258,25 @@ def _evict_idle_subgraph_databases(pool, target_graph_id: str) -> list[str]:
   return evicted
 
 
+def reopen_sibling_subgraphs(pool, changed_graph_id: str) -> list[str]:
+  """Close the idle subgraphs beside one just created or deleted.
+
+  Subgraphs share a memory budget, so each one's buffer pool depends on how
+  many exist, and a pool's size is fixed when its database opens. Closing the
+  idle ones makes them reopen at the new share. One with a query in flight
+  keeps its size until it next goes idle. Does nothing for a parent graph.
+  """
+  if "_" not in changed_graph_id:
+    return []
+  reopened = _evict_idle_subgraph_databases(pool, changed_graph_id)
+  if reopened:
+    logger.info(
+      f"Subgraph set changed ({changed_graph_id}); {len(reopened)} idle "
+      "subgraph(s) will reopen at the new memory share"
+    )
+  return reopened
+
+
 def ensure_ladybug_memory_boosted(graph_id: str) -> int | None:
   """Boost LadybugDB memory for a graph unless it is already boosted.
 

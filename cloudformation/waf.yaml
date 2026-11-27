@@ -157,16 +157,42 @@ Resources:
                         Type: URL_DECODE
                       - Priority: 1
                         Type: HTML_ENTITY_DECODE
-                # Cross-site scripting - Request Body
-                - XssMatchStatement:
-                    FieldToMatch:
-                      Body:
-                        OversizeHandling: CONTINUE
-                    TextTransformations:
-                      - Priority: 0
-                        Type: URL_DECODE
-                      - Priority: 1
-                        Type: HTML_ENTITY_DECODE
+                # Cross-site scripting - Request Body, everywhere except the MCP
+                # endpoints. A path ending in /mcp or /mcp/roboledger carries JSON-RPC whose string
+                # values are text a client stores (notes, summaries, markdown),
+                # and the API answers JSON and renders none of it, so a markup
+                # signature there only rejects prose.
+                - AndStatement:
+                    Statements:
+                      - NotStatement:
+                          Statement:
+                            OrStatement:
+                              Statements:
+                                - ByteMatchStatement:
+                                    FieldToMatch:
+                                      UriPath: {}
+                                    PositionalConstraint: ENDS_WITH
+                                    SearchString: /mcp
+                                    TextTransformations:
+                                      - Priority: 0
+                                        Type: LOWERCASE
+                                - ByteMatchStatement:
+                                    FieldToMatch:
+                                      UriPath: {}
+                                    PositionalConstraint: ENDS_WITH
+                                    SearchString: /mcp/roboledger
+                                    TextTransformations:
+                                      - Priority: 0
+                                        Type: LOWERCASE
+                      - XssMatchStatement:
+                          FieldToMatch:
+                            Body:
+                              OversizeHandling: CONTINUE
+                          TextTransformations:
+                            - Priority: 0
+                              Type: URL_DECODE
+                            - Priority: 1
+                              Type: HTML_ENTITY_DECODE
                 # Cross-site scripting - URI Path
                 - XssMatchStatement:
                     FieldToMatch:
@@ -225,6 +251,49 @@ Resources:
             SampledRequestsEnabled: true
             CloudWatchMetricsEnabled: true
             MetricName: BlockSqliBody
+
+        # Rule 6b: the managed group's body path-traversal match, everywhere
+        # except the MCP endpoints, whose JSON-RPC string values are stored
+        # text that may hold a relative path. The group counts the match and
+        # labels the request; this rule blocks on the label. It never matches
+        # when the managed group is disabled.
+        - Name: BlockLfiBody
+          Priority: 8
+          Statement:
+            AndStatement:
+              Statements:
+                - LabelMatchStatement:
+                    Scope: LABEL
+                    Key: awswaf:managed:aws:core-rule-set:GenericLFI_Body
+                - NotStatement:
+                    Statement:
+                      OrStatement:
+                        Statements:
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: ENDS_WITH
+                              SearchString: /mcp
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: ENDS_WITH
+                              SearchString: /mcp/roboledger
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: CommonAttackBlocked
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockLfiBody
 
         # Rule 4: Size restrictions (prevent large payload attacks)
         - Name: SizeRestrictions
@@ -315,6 +384,12 @@ Resources:
                   - Name: RestrictedExtensions_QUERYARGUMENTS # Can block legitimate query params
                   - Name: EC2MetaDataSSRF_BODY # Can block legitimate requests with URLs
                   - Name: EC2MetaDataSSRF_QUERYARGUMENTS # Can block legitimate URL parameters
+                RuleActionOverrides:
+                  # Counted here and blocked by rule 6b, which leaves the MCP
+                  # endpoints out.
+                  - Name: GenericLFI_BODY
+                    ActionToUse:
+                      Count: {}
             VisibilityConfig:
               SampledRequestsEnabled: true
               CloudWatchMetricsEnabled: true

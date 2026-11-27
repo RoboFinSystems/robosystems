@@ -48,6 +48,26 @@ def _validated_database_path(base_path: Path, database_name: str) -> Path:
   return Path(candidate)
 
 
+DEFAULT_CHECKPOINT_THRESHOLD = 536870912  # 512 MB
+SEC_CHECKPOINT_THRESHOLD = 134217728  # 128 MB
+MIN_CHECKPOINT_THRESHOLD = 33554432  # 32 MB
+
+
+def checkpoint_threshold_for(database_name: str, buffer_pool_size: int) -> int:
+  """The WAL size at which a database checkpoints, in bytes.
+
+  Written rows are held in the buffer pool until a checkpoint, so a threshold
+  the pool cannot reach is never crossed: writes fill the pool and every
+  statement after that fails. A quarter of the pool keeps the checkpoint ahead
+  of it. SEC keeps its own lower figure, since its Fact and Association tables
+  are large enough to exhaust memory under the default.
+  """
+  scaled = max(MIN_CHECKPOINT_THRESHOLD, buffer_pool_size // 4)
+  if database_name == "sec":
+    return min(SEC_CHECKPOINT_THRESHOLD, scaled)
+  return min(DEFAULT_CHECKPOINT_THRESHOLD, scaled)
+
+
 @dataclass
 class ConnectionInfo:
   """Information about a connection in the pool."""
@@ -291,13 +311,7 @@ class LadybugConnectionPool:
           # read-only for the first request would lock out every later write.
           db_read_only = False
 
-        # SEC's Fact and Association tables are large enough that the default
-        # threshold lets the WAL grow until it exhausts memory.
-        if database_name == "sec":
-          checkpoint_threshold = 134217728
-          logger.info("Using reduced checkpoint threshold (128MB) for SEC database")
-        else:
-          checkpoint_threshold = 536870912
+        checkpoint_threshold = checkpoint_threshold_for(database_name, buffer_pool_size)
 
         self._databases[database_name] = lbug.Database(
           str(db_path),

@@ -1022,3 +1022,71 @@ class TestSubgraphServiceIntegration:
           f"{parent_graph_id}_test"
         )
         assert delete_result["status"] == "deleted"
+
+
+class _NoClose:
+  """Keeps the fixture session alive past the service's close."""
+
+  def __init__(self, session):
+    self._session = session
+
+  def __getattr__(self, name):
+    return getattr(self._session, name)
+
+  def close(self):
+    pass
+
+
+class TestCreateSubgraphNaming:
+  """A subgraph is listed under its display name, or its short name; a
+  description is kept as the description, never shown as the name."""
+
+  async def _create(self, test_db, test_user, test_org, **kwargs):
+    from uuid import uuid4
+
+    from robosystems.models.core import Graph
+
+    parent = Graph.create(
+      graph_id=f"kg{uuid4().hex[:16]}",
+      org_id=test_org.id,
+      graph_name="Parent",
+      graph_type="generic",
+      session=test_db,
+    )
+    service = SubgraphService()
+    with (
+      patch.object(
+        service,
+        "create_subgraph_database",
+        new=AsyncMock(return_value={"status": "created", "instance_id": "i-test"}),
+      ),
+      patch(
+        "robosystems.database.get_db_session",
+        return_value=iter([_NoClose(test_db)]),
+      ),
+    ):
+      result = await service.create_subgraph(
+        parent_graph=parent,
+        user=test_user,
+        name="capstone",
+        subgraph_type="empty",
+        **kwargs,
+      )
+    return Graph.get_by_id(result["graph_id"], test_db)
+
+  @pytest.mark.asyncio
+  async def test_description_is_not_the_name(self, test_db, test_user, test_org):
+    long_description = "Capstone knowledge graph: " + "x" * 200
+    subgraph = await self._create(
+      test_db, test_user, test_org, description=long_description
+    )
+    assert subgraph.graph_name == "capstone"
+    assert subgraph.subgraph_metadata["description"] == long_description
+
+  @pytest.mark.asyncio
+  async def test_display_name_is_the_name(self, test_db, test_user, test_org):
+    subgraph = await self._create(
+      test_db, test_user, test_org, display_name="Capstone", description="d"
+    )
+    assert subgraph.graph_name == "Capstone"
+    assert subgraph.subgraph_metadata["description"] == "d"
