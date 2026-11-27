@@ -56,6 +56,13 @@ def test_a_version_that_falls_is_a_downgrade():
   assert _names(guard.find_downgrades(base, head)) == ["pypdf"]
 
 
+def test_the_projects_own_version_going_down_is_not_a_downgrade():
+  base = _lock(_package("robosystems", "1.25.3"))
+  head = _lock(_package("robosystems", "1.25.2"))
+
+  assert guard.find_downgrades(base, head) == []
+
+
 def test_versions_compare_numerically_not_as_text():
   base = _lock(_package("pkg", "1.9.0"))
   head = _lock(_package("pkg", "1.10.0"))

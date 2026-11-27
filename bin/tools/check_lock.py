@@ -54,13 +54,17 @@ def declared_constraints(lock: dict) -> dict[str, set[str]]:
 
 
 def find_downgrades(base: dict, head: dict) -> list[tuple[str, Version, Version]]:
-  """Packages whose version fell while their declared constraint stayed the same."""
+  """Packages whose version fell while their declared constraint stayed the same.
+
+  The project itself is left out: its version is set by the release, not
+  resolved, so a lower one is a release undone, never a rollback by re-lock.
+  """
   before, after = locked_versions(base), locked_versions(head)
   base_constraints = declared_constraints(base)
   head_constraints = declared_constraints(head)
   return [
     (name, before[name], after[name])
-    for name in sorted(before.keys() & after.keys())
+    for name in sorted((before.keys() & after.keys()) - {PROJECT})
     if after[name] < before[name]
     and base_constraints.get(name) == head_constraints.get(name)
   ]
