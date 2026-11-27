@@ -23,7 +23,7 @@ import ladybug as lbug
 from fastapi import HTTPException
 from fastapi import status as http_status
 
-from robosystems.config.storage.graph import graph_db_filename
+from robosystems.config.storage.graph import graph_db_filename, graph_db_wal_filename
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -115,6 +115,8 @@ class LadybugConnectionPool:
     # Connections checked out and not yet returned, per database. A pooled
     # connection outlives its query, so the pool's contents cannot say this.
     self._borrowed: dict[str, int] = {}
+    # Database file mtime when its WAL was last seen on disk (see _note_wal).
+    self._wal_seen: dict[str, int] = {}
     self._conn_ids = itertools.count()
 
     self._stats = {
@@ -152,6 +154,8 @@ class LadybugConnectionPool:
           self._borrowed[database_name] = max(
             0, self._borrowed.get(database_name, 0) - 1
           )
+          if not read_only:
+            self._note_wal(database_name)
 
   def _acquire_connection(self, database_name: str, read_only: bool) -> ConnectionInfo:
     """Reuse a valid pooled connection, or create one, and count it borrowed."""
@@ -185,6 +189,49 @@ class LadybugConnectionPool:
         return False
       self.close_database_connections(database_name)
       return True
+
+  def _close_database_object(self, database_name: str, db: lbug.Database) -> None:
+    """Close a Database object and every connection still open on it.
+
+    The engine keeps a database open for as long as any connection to it is,
+    whatever is closed on the Database object, and when the last one goes it
+    deletes the WAL at the database's path. If the file has been deleted and
+    recreated by then, that is the new database's WAL: its writes stay
+    readable and are lost at the next restart. So nothing may outlive this.
+    """
+    for connection in list(getattr(db, "_connections", ())):
+      try:
+        connection.close()
+      except Exception as e:
+        logger.warning(f"Error closing a connection left on {database_name}: {e}")
+    try:
+      db.close()
+    except Exception as e:
+      logger.warning(f"Error closing database {database_name}: {e}")
+    self._wal_seen.pop(database_name, None)
+
+  def _note_wal(self, database_name: str) -> None:
+    """Notice a WAL that disappeared without a checkpoint.
+
+    A checkpoint removes the WAL and rewrites the database file. A WAL that is
+    gone while the file is untouched was removed by something else, and what
+    was in it will not survive a restart. This only reports it: by then the
+    engine can no longer checkpoint, but the rows are still readable.
+    """
+    db_path = self.base_path / graph_db_filename(database_name)
+    wal_path = self.base_path / graph_db_wal_filename(database_name)
+    try:
+      file_mtime = db_path.stat().st_mtime_ns
+      if wal_path.exists():
+        self._wal_seen[database_name] = file_mtime
+      elif self._wal_seen.pop(database_name, None) == file_mtime:
+        logger.error(
+          f"The write-ahead log of {database_name} was removed without a "
+          "checkpoint: writes since the last checkpoint are readable now and "
+          "will be lost when the database is next reopened"
+        )
+    except OSError:
+      pass
 
   def _close_connections_on_a_dropped_database(self, database_name: str) -> None:
     """Close pooled connections whose database object is no longer the one
@@ -232,11 +279,7 @@ class LadybugConnectionPool:
         del self._pools[database_name]
 
         if database_name in self._databases:
-          try:
-            self._databases[database_name].close()
-          except Exception as e:
-            logger.warning(f"Error closing database object during invalidation: {e}")
-          del self._databases[database_name]
+          self._close_database_object(database_name, self._databases.pop(database_name))
           logger.info(f"Removed shared Database object for {database_name}")
 
         logger.info(f"Invalidated all connections for database: {database_name}")
@@ -585,13 +628,7 @@ class LadybugConnectionPool:
           total_closed += 1
 
       for db_name in list(self._databases.keys()):
-        try:
-          db = self._databases[db_name]
-          if hasattr(db, "close"):
-            db.close()
-        except Exception as e:
-          logger.warning(f"Error closing database {db_name}: {e}")
-        del self._databases[db_name]
+        self._close_database_object(db_name, self._databases.pop(db_name))
 
       self._pools.clear()
       self._locks.clear()
@@ -635,8 +672,7 @@ class LadybugConnectionPool:
             except Exception as cp_err:
               logger.debug(f"Could not execute checkpoint: {cp_err}")
 
-          if hasattr(db, "close"):
-            db.close()
+          self._close_database_object(database_name, db)
         except Exception as e:
           logger.debug(f"Could not close database object: {e}")
 
@@ -721,19 +757,15 @@ class LadybugConnectionPool:
     handle is open.
     """
     with self._get_database_lock(database_name):
-      if database_name in self._pools:
-        pool = self._pools[database_name]
-        for conn_id in list(pool.keys()):
-          self._close_connection(database_name, conn_id)
+      for conn_id in list(self._pools.get(database_name, {})):
+        self._close_connection(database_name, conn_id)
 
-        if database_name in self._databases:
-          try:
-            self._databases[database_name].close()
-          except Exception as e:
-            logger.warning(f"Error closing database {database_name}: {e}")
-          del self._databases[database_name]
+      # Whether or not the pool still held a connection to it: a Database
+      # object left open here would outlive the file it was opened on.
+      if database_name in self._databases:
+        self._close_database_object(database_name, self._databases.pop(database_name))
 
-        logger.debug(f"Closed all connections for database {database_name}")
+      logger.debug(f"Closed all connections for database {database_name}")
 
   def has_active_connections(self, database_name: str) -> bool:
     """Check if there are any active connections for a database."""

@@ -155,12 +155,12 @@ class LadybugDatabaseManager:
         detail=f"Database {request.graph_id} already exists",
       )
 
-    # An orphaned WAL from an incomplete deletion would be replayed into the
-    # new database, so it is removed before creating.
-    wal_path = self.base_path / graph_db_wal_filename(request.graph_id)
-    if wal_path.exists():
-      wal_path.unlink()
-      logger.info(f"Cleaned up orphaned WAL file for {request.graph_id}")
+    # Anything an earlier database of this name left beside its file (a WAL,
+    # or the pieces of an interrupted checkpoint) would be replayed into the
+    # new one, or refused by it, so it is removed before creating.
+    for leftover in self._engine_side_files(request.graph_id):
+      leftover.unlink()
+      logger.info(f"Cleaned up orphaned {leftover.name} before creating")
 
     try:
       logger.info(f"Creating database: {request.graph_id}")
@@ -380,15 +380,14 @@ class LadybugDatabaseManager:
     """
     removed: list[str] = []
 
-    for suffix in GRAPH_DB_SUFFIXES:
-      # The WAL goes first: left behind, it would be replayed against a
-      # database recreated under the same name.
-      wal_path = self.base_path / f"{name}{suffix}.wal"
-      if wal_path.exists():
-        wal_path.unlink()
-        removed.append(str(wal_path))
-        logger.debug(f"Deleted WAL file for {name}")
+    # The side files go first: left behind, the engine would replay them
+    # into a database recreated under the same name, or refuse to open it.
+    for side_file in self._engine_side_files(name):
+      side_file.unlink()
+      removed.append(str(side_file))
+      logger.debug(f"Deleted {side_file.name}")
 
+    for suffix in GRAPH_DB_SUFFIXES:
       db_path = self.base_path / f"{name}{suffix}"
       if db_path.is_file():
         db_path.unlink()
@@ -399,6 +398,22 @@ class LadybugDatabaseManager:
         removed.append(str(db_path))
 
     return removed
+
+  def _engine_side_files(self, name: str) -> list[Path]:
+    """The files the engine keeps beside ``{name}.lbdb``: its WAL, and what a
+    checkpoint that did not finish leaves (shadow pages, the rotated WAL, lock
+    files). An engine upgrade's ``.pre-migration`` copy is not one of them."""
+    prefixes = tuple(f"{name}{suffix}." for suffix in GRAPH_DB_SUFFIXES)
+    try:
+      return sorted(
+        path
+        for path in self.base_path.iterdir()
+        if path.name.startswith(prefixes)
+        and not path.name.endswith(".pre-migration")
+        and path.is_file()
+      )
+    except FileNotFoundError:
+      return []
 
   def _remove_migration_files(self, name: str) -> list[str]:
     """Remove what an engine upgrade left for ``name``: the ``.pre-migration``
@@ -482,10 +497,17 @@ class LadybugDatabaseManager:
             active_wal.rename(self.base_path / graph_db_wal_filename(prev_id))
           logger.info(f"Moved active {graph_id} to {prev_id}")
 
+        # Whatever else the outgoing database left under the active name. It
+        # stays until the WIP is in place, so a rollback finds it; after that
+        # the incoming database would take it as its own.
+        outgoing_leftovers = self._engine_side_files(graph_id)
+
         wip_path.rename(active_path)
         wip_wal = self.base_path / graph_db_wal_filename(wip_id)
         if wip_wal.exists():
           wip_wal.rename(self.base_path / graph_db_wal_filename(graph_id))
+        for leftover in outgoing_leftovers:
+          leftover.unlink(missing_ok=True)
         logger.info(f"Promoted WIP {wip_id} to active {graph_id}")
 
       if prev_path.exists():
