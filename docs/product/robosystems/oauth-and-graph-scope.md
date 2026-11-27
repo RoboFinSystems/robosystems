@@ -50,7 +50,7 @@ Changing your password signs every connected app out at once.
 
 Scripts, CI jobs and clients that can't open a browser connect with an API key rather than a sign-in, using a graph's own address. A key created from the app's **MCP** page reaches only the graph it was made for: a parent graph's key covers its subgraphs too, and a subgraph's key reaches that subgraph alone. Revoke a key under **User Settings → API keys**. See [Authentication and API keys](https://robosystems.ai/docs/technical/authentication-and-api-keys).
 
-A developer who wants one connection for every graph a key covers can run the RoboSystems bridge locally; see [For developers](connect-an-mcp-client.md#for-developers).
+A developer who wants one connection for every graph a key covers connects `https://api.robosystems.ai/v1/mcp/graphs` with an API key; see [For developers](connect-an-mcp-client.md#for-developers).
 
 ## Try asking
 

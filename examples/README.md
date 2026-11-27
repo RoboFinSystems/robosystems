@@ -296,8 +296,7 @@ Logs: `just logs api`, `just logs worker`.
 - [Schema System](../robosystems/schemas/README.md) — schema definitions
 - [Documentation](https://robosystems.ai/docs/technical) — guides and tutorials
 - SDKs: [Python](https://github.com/RoboFinSystems/robosystems-python-client) ·
-  [TypeScript](https://github.com/RoboFinSystems/robosystems-typescript-client) ·
-  [MCP](https://github.com/RoboFinSystems/robosystems-mcp-bridge)
+  [TypeScript](https://github.com/RoboFinSystems/robosystems-typescript-client)
 
 ## Support
 
