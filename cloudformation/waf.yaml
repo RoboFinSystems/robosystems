@@ -295,6 +295,49 @@ Resources:
             CloudWatchMetricsEnabled: true
             MetricName: BlockLfiBody
 
+        # Rule 6c: the managed group's body cross-site-scripting match, everywhere
+        # except the MCP endpoints, whose JSON-RPC string values are stored
+        # text that may hold markup the API never renders. The group counts the match and
+        # labels the request; this rule blocks on the label. It never matches
+        # when the managed group is disabled.
+        - Name: BlockXssBody
+          Priority: 9
+          Statement:
+            AndStatement:
+              Statements:
+                - LabelMatchStatement:
+                    Scope: LABEL
+                    Key: awswaf:managed:aws:core-rule-set:CrossSiteScripting_Body
+                - NotStatement:
+                    Statement:
+                      OrStatement:
+                        Statements:
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: ENDS_WITH
+                              SearchString: /mcp
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+                          - ByteMatchStatement:
+                              FieldToMatch:
+                                UriPath: {}
+                              PositionalConstraint: ENDS_WITH
+                              SearchString: /mcp/roboledger
+                              TextTransformations:
+                                - Priority: 0
+                                  Type: LOWERCASE
+          Action:
+            Block:
+              CustomResponse:
+                ResponseCode: 403
+                CustomResponseBodyKey: CommonAttackBlocked
+          VisibilityConfig:
+            SampledRequestsEnabled: true
+            CloudWatchMetricsEnabled: true
+            MetricName: BlockXssBody
+
         # Rule 4: Size restrictions (prevent large payload attacks)
         - Name: SizeRestrictions
           Priority: 4
@@ -411,6 +454,11 @@ Resources:
                   # Counted here and blocked by rule 6b, which leaves the MCP
                   # endpoints out.
                   - Name: GenericLFI_BODY
+                    ActionToUse:
+                      Count: {}
+                  # Counted here and blocked by rule 6c, which leaves the MCP
+                  # endpoints out.
+                  - Name: CrossSiteScripting_BODY
                     ActionToUse:
                       Count: {}
             VisibilityConfig:
