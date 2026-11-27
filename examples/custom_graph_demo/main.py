@@ -148,7 +148,12 @@ def main():
   # Step 6: Upload project management documents (if documents/ directory exists)
   docs_dir = DEMO_DIR / "documents"
   if docs_dir.exists() and list(docs_dir.glob("*.md")):
-    step6_args = ["--base-url", args.base_url]
+    step6_args = [
+      "--base-url",
+      args.base_url,
+      "--credentials-file",
+      str(credentials_path),
+    ]
     run_script("upload_documents.py", step6_args)
 
   # Step 7: Create memory subgraph

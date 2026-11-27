@@ -191,6 +191,8 @@ Each one recreates the containers that read the setting, so there is nothing to 
 
 The stack is not set up for Bedrock, on purpose: the instance's role can open a Session Manager session and read its own settings secret, and nothing else in your account. To run the operators on a model you host instead, set the `OPENAI_COMPAT_*` settings from [Self-Hosted AI Models](Self-Hosted-AI-Models.md) the same way.
 
+**Feature flags and tuning.** On the hosted platform these are read from AWS Parameter Store. A self-hosted stack reads no Parameter Store: `.env` is the only override, and `just serve set` writes it. A feature flag keeps its name, `just serve set SEMANTIC_MEMORY_ENABLED true` for example. A tuning value is `TUNING_` and its path with underscores, so `tuning/timeouts/GRAPH_QUERY` is `just serve set TUNING_TIMEOUTS_GRAPH_QUERY 120`. Without a setting, each one runs on the release's default.
+
 ## Limits Today
 
 What this shape does not do yet, and what to do about it:

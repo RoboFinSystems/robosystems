@@ -39,11 +39,11 @@ SAMPLE_SEARCHES = [
 ]
 
 
-def load_credentials() -> dict:
-  if not CREDENTIALS_FILE.exists():
-    print("❌ Credentials not found. Run setup_credentials.py first.")
+def load_credentials(path: Path = CREDENTIALS_FILE) -> dict:
+  if not path.exists():
+    print(f"❌ Credentials not found at {path}. Run setup_credentials.py first.")
     sys.exit(1)
-  with CREDENTIALS_FILE.open() as f:
+  with path.open() as f:
     return json.load(f)
 
 
@@ -122,11 +122,17 @@ def main():
     default=os.environ.get("ROBOSYSTEMS_API_URL", "http://localhost:8000"),
     help="API base URL (default: $ROBOSYSTEMS_API_URL or http://localhost:8000)",
   )
+  parser.add_argument(
+    "--credentials-file",
+    default=str(CREDENTIALS_FILE),
+    help="Path to credentials file (default: .local/config.json)",
+  )
   args = parser.parse_args()
+  credentials_path = Path(args.credentials_file).expanduser()
 
-  credentials = load_credentials()
+  credentials = load_credentials(credentials_path)
   api_key = credentials.get("api_key")
-  graph_id = get_graph_id(CREDENTIALS_FILE, DEMO_NAME)
+  graph_id = get_graph_id(credentials_path, DEMO_NAME)
 
   if not api_key or not graph_id:
     print("❌ Missing API key or graph ID. Run previous demo steps first.")

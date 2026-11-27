@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -334,6 +335,54 @@ class TestUpgradeToDryRun:
     )
     assert ":v1.21.12" in (clone / ".env").read_text()
     assert not (clone / ".local").exists()
+
+  def test_runs_from_its_own_kept_copy(self, tmp_path: Path, status_server: str):
+    """The rollback hint runs the copy in .local/release-tools; it must not trip
+    over copying itself onto itself."""
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@example.com"]
+    origin = tmp_path / "origin.git"
+    subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
+    clone = tmp_path / "clone"
+    subprocess.run([*git, "clone", "-q", str(origin), str(clone)], check=True)
+    (clone / "compose.yaml").write_text("services: {}\n")
+    (clone / ".env.example").write_text(
+      "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:latest\n"
+    )
+    subprocess.run([*git, "add", "."], cwd=clone, check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "init"], cwd=clone, check=True)
+    subprocess.run([*git, "tag", "v1.22.0"], cwd=clone, check=True)
+    subprocess.run(
+      [*git, "push", "-q", "origin", "HEAD", "--tags"], cwd=clone, check=True
+    )
+    (clone / ".env").write_text(
+      "ROBOSYSTEMS_IMAGE=registry.example.internal/robosystems:v1.21.12\n"
+    )
+    kept = clone / ".local" / "release-tools"
+    kept.mkdir(parents=True)
+    for name in (
+      "upgrade-to.sh",
+      "check-release-image.sh",
+      "settings-drift.sh",
+      "wait-for-version.sh",
+      "upgrade.sh",
+    ):
+      shutil.copy2(TOOLS / name, kept / name)
+    # The pull and recreate need a Docker daemon; this is about the script itself.
+    (kept / "upgrade.sh").write_text("#!/bin/bash\nexit 0\n")
+    env = {**_stub_docker(tmp_path, "", 0), "STATUS_URL": status_server}
+
+    result = subprocess.run(
+      ["bash", ".local/release-tools/upgrade-to.sh", "v1.22.0"],
+      cwd=clone,
+      capture_output=True,
+      text=True,
+      timeout=60,
+      env=env,
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "✅ On v1.22.0" in result.stdout
+    assert ":v1.22.0" in (clone / ".env").read_text()
 
   def test_rejects_an_unknown_flag(self, tmp_path: Path):
     (tmp_path / ".env").write_text(
