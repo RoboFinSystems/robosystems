@@ -26,7 +26,7 @@ A **subgraph** is a separate workspace inside a graph, for a what-if or a test w
 
 Open **Subgraphs** to list them and create one. A subgraph created here starts empty. Each one has **Connect**, which opens the **MCP** page with that subgraph's own address, so you can connect an AI client to it the same way you connect the parent. You can also back up or delete a subgraph from its row.
 
-Developers who create subgraphs as they work can skip the separate connection: the RoboSystems bridge reaches a new subgraph on the next call. See [For developers](connect-an-mcp-client.md#for-developers).
+Developers who create subgraphs as they work can skip the separate connection: the every-graph address, `https://api.robosystems.ai/v1/mcp/graphs`, reaches a new subgraph on the next call. See [For developers](connect-an-mcp-client.md#for-developers).
 
 ## Backups
 

@@ -65,7 +65,7 @@ export ROBOSYSTEMS_API_KEY=rfs...   # Settings → API keys at robosystems.ai
 export GRAPH_ID=kg...               # from GET /v1/graphs or the app's graph selector
 ```
 
-**Important:** `ROBOSYSTEMS_API_KEY` is the same variable name the MCP client uses, and it is the pattern across the RoboSystems docs. Keep the key in the environment rather than pasting the literal into commands.
+**Important:** `ROBOSYSTEMS_API_KEY` is the same variable name the [MCP bridge](The-MCP-Bridge.md) uses, and it is the pattern across the RoboSystems docs. Keep the key in the environment rather than pasting the literal into commands.
 
 ## The X-API-Key Path
 
