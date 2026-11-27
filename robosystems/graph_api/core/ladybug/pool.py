@@ -112,6 +112,9 @@ class LadybugConnectionPool:
 
     # One Database object per database name, shared by all its connections.
     self._databases: dict[str, lbug.Database] = {}
+    # Connections checked out and not yet returned, per database. A pooled
+    # connection outlives its query, so the pool's contents cannot say this.
+    self._borrowed: dict[str, int] = {}
     self._conn_ids = itertools.count()
 
     self._stats = {
@@ -145,9 +148,13 @@ class LadybugConnectionPool:
     finally:
       if connection_info:
         self._release_connection(database_name, connection_info)
+        with self._get_database_lock(database_name):
+          self._borrowed[database_name] = max(
+            0, self._borrowed.get(database_name, 0) - 1
+          )
 
   def _acquire_connection(self, database_name: str, read_only: bool) -> ConnectionInfo:
-    """Reuse a valid pooled connection, or create one."""
+    """Reuse a valid pooled connection, or create one, and count it borrowed."""
     self._maybe_run_maintenance()
 
     with self._get_database_lock(database_name):
@@ -161,9 +168,23 @@ class LadybugConnectionPool:
         logger.debug(
           f"Reused connection for {database_name} (use count: {connection_info.use_count})"
         )
-        return connection_info
+      else:
+        connection_info = self._create_new_connection(database_name, read_only)
 
-      return self._create_new_connection(database_name, read_only)
+      self._borrowed[database_name] = self._borrowed.get(database_name, 0) + 1
+      return connection_info
+
+  def close_if_idle(self, database_name: str) -> bool:
+    """Close a database no caller has a connection to, and say whether it did.
+
+    Checked and closed under the database's lock, which checking a connection
+    out also takes, so no query can start on it midway.
+    """
+    with self._get_database_lock(database_name):
+      if self._borrowed.get(database_name, 0):
+        return False
+      self.close_database_connections(database_name)
+      return True
 
   def _close_connections_on_a_dropped_database(self, database_name: str) -> None:
     """Close pooled connections whose database object is no longer the one

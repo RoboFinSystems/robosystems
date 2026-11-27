@@ -673,6 +673,56 @@ class TestLadybugConnectionPoolHasActiveConnections:
 
 
 @pytest.mark.unit
+class TestLadybugConnectionPoolCloseIfIdle:
+  """A database is idle when no connection to it is checked out, whatever the
+  pool still holds for reuse."""
+
+  def setup_method(self):
+    self.temp_dir = tempfile.mkdtemp()
+    self.pool = _make_pool(self.temp_dir)
+    conn = ConnectionInfo(
+      connection=MagicMock(),
+      database=MagicMock(),
+      created_at=datetime.now(UTC),
+      last_used=datetime.now(UTC),
+      use_count=0,
+      is_healthy=True,
+    )
+    self.pool._create_new_connection = MagicMock(return_value=conn)
+    self.pool._release_connection = MagicMock()
+    self.pool.close_database_connections = MagicMock()
+
+  def teardown_method(self):
+    shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+  def test_a_database_mid_query_is_not_closed(self):
+    with self.pool.get_connection("kg1_a"):
+      assert self.pool.close_if_idle("kg1_a") is False
+    self.pool.close_database_connections.assert_not_called()
+
+  def test_a_returned_connection_does_not_keep_it_open(self):
+    with self.pool.get_connection("kg1_a"):
+      pass
+    self.pool._pools["kg1_a"] = {"c0": MagicMock()}  # still pooled for reuse
+
+    assert self.pool.close_if_idle("kg1_a") is True
+    self.pool.close_database_connections.assert_called_once_with("kg1_a")
+
+  def test_a_failed_query_still_returns_its_connection(self):
+    with pytest.raises(RuntimeError), self.pool.get_connection("kg1_a"):
+      raise RuntimeError("query failed")
+
+    assert self.pool.close_if_idle("kg1_a") is True
+
+  def test_each_borrower_is_counted(self):
+    with self.pool.get_connection("kg1_a"):
+      with self.pool.get_connection("kg1_a"):
+        pass
+      assert self.pool.close_if_idle("kg1_a") is False
+    assert self.pool.close_if_idle("kg1_a") is True
+
+
+@pytest.mark.unit
 class TestLadybugConnectionPoolListDatabases:
   """Tests for list_databases."""
 
