@@ -257,8 +257,17 @@ Graph lifecycle (`graph_tools.py`, `MCP_WORKSPACE_ENABLED`): `create-subgraph`,
 `get-graph-sync-status`, `set-write-policy`.
 
 Subgraph writes (`MCP_SUBGRAPH_OPS_ENABLED`, writable subgraphs only):
-`write-graph-cypher`, `add-node-table`, `add-relationship-table`. The main graph
-is read-only from MCP; these apply to subgraphs.
+`write-graph-cypher`, `add-node-table`, `add-relationship-table`, and the bulk
+pair `create-table-import` / `run-table-import`. The main graph is read-only
+from MCP; these apply to subgraphs.
+
+Cypher writes are for crafting a graph a statement at a time (a list parameter
+holds at most 1,000 items and 50,000 characters). Bulk rows go in as Parquet:
+`create-table-import` presigns one upload per table, the client PUTs the files
+straight to storage, and `run-table-import` copies each into its table in
+incremental mode, so rows are added and nothing is rebuilt. A subgraph has no
+rebuild or materialize: to start over, create a new subgraph, populate it, and
+delete the old one.
 
 Semantic memory (`SEMANTIC_MEMORY_ENABLED` plus the sub-gate
 `MCP_SEMANTIC_MEMORY_ENABLED`): `remember`, `recall`, `update-memory`, `forget`

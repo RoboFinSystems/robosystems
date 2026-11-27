@@ -486,3 +486,77 @@ class TestDdlClearsSchemaCache:
 
     assert result["success"] is True
     assert tools.schema_tool._schema_cache is None
+
+
+class TestTableImportTools:
+  """The two bulk-import tools: subgraph-only, and thin over the operation."""
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_create_is_refused_on_a_parent_graph(self, mock_parent_client):
+    from robosystems.middleware.mcp.tools.subgraph_write_tools import (
+      CreateTableImportTool,
+    )
+
+    result = await CreateTableImportTool(mock_parent_client).execute(
+      {"tables": ["Person"]}
+    )
+    assert result["error"] == "subgraph_required"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_create_returns_uploads_and_the_next_step(self, mock_subgraph_client):
+    from unittest.mock import patch
+
+    from robosystems.middleware.mcp.tools.subgraph_write_tools import (
+      CreateTableImportTool,
+    )
+
+    mock_subgraph_client.user = MagicMock(id="user_1")
+    with patch(
+      "robosystems.operations.uploads.presign_upload", return_value="https://put"
+    ):
+      result = await CreateTableImportTool(mock_subgraph_client).execute(
+        {"tables": ["Person"]}
+      )
+
+    assert result["uploads"] == [{"table_name": "Person", "upload_url": "https://put"}]
+    assert "run-table-import" in result["next"]
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_a_bad_table_name_is_an_input_error(self, mock_subgraph_client):
+    from robosystems.middleware.mcp.tools.subgraph_write_tools import (
+      CreateTableImportTool,
+    )
+
+    mock_subgraph_client.user = MagicMock(id="user_1")
+    result = await CreateTableImportTool(mock_subgraph_client).execute(
+      {"tables": ["bad name"]}
+    )
+    assert result["error"] == "invalid_input"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_run_needs_a_user(self, mock_subgraph_client):
+    from robosystems.middleware.mcp.tools.subgraph_write_tools import (
+      RunTableImportTool,
+    )
+
+    mock_subgraph_client.user = None
+    result = await RunTableImportTool(mock_subgraph_client).execute(
+      {"import_id": "x", "tables": ["Person"]}
+    )
+    assert result["error"] == "authentication_required"
+
+  @pytest.mark.unit
+  @pytest.mark.asyncio
+  async def test_run_is_refused_on_a_parent_graph(self, mock_parent_client):
+    from robosystems.middleware.mcp.tools.subgraph_write_tools import (
+      RunTableImportTool,
+    )
+
+    result = await RunTableImportTool(mock_parent_client).execute(
+      {"import_id": "x", "tables": ["Person"]}
+    )
+    assert result["error"] == "subgraph_required"

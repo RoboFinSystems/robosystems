@@ -43,6 +43,8 @@ from .sensitive import drop_withheld_arguments
 from .subgraph_write_tools import (
   AddNodeTableTool,
   AddRelationshipTableTool,
+  CreateTableImportTool,
+  RunTableImportTool,
   WriteCypherTool,
 )
 
@@ -69,6 +71,9 @@ SUBGRAPH_TOOL_PROFILE = frozenset(
     "read-graph-cypher",
     "write-graph-cypher",
     "get-example-queries",
+    # Bulk rows by file, appended without the rebuild the staging pipeline does
+    "create-table-import",
+    "run-table-import",
     # Semantic memory. A subgraph gets no memory store, so remember and
     # update-memory are never registered on one; recall and forget are.
     "recall",
@@ -97,6 +102,8 @@ ROBOLEDGER_ROUTE_TOOL_EXCLUSIONS = frozenset(
     "write-graph-cypher",
     "add-node-table",
     "add-relationship-table",
+    "create-table-import",
+    "run-table-import",
     # Workspace administration — a new subgraph needs its own connector.
     "create-subgraph",
     "delete-subgraph",
@@ -290,10 +297,14 @@ class GraphMCPTools:
     self.write_cypher_tool = None
     self.add_node_table_tool = None
     self.add_relationship_table_tool = None
+    self.create_table_import_tool = None
+    self.run_table_import_tool = None
     if env.MCP_SUBGRAPH_OPS_ENABLED and not read_only:
       self.write_cypher_tool = WriteCypherTool(graph_client)
       self.add_node_table_tool = AddNodeTableTool(graph_client)
       self.add_relationship_table_tool = AddRelationshipTableTool(graph_client)
+      self.create_table_import_tool = CreateTableImportTool(graph_client)
+      self.run_table_import_tool = RunTableImportTool(graph_client)
 
     self.build_fact_grid_tool = None
     if env.FACT_GRID_ENABLED:
@@ -756,6 +767,8 @@ class GraphMCPTools:
       self.write_cypher_tool.get_tool_definition(),
       self.add_node_table_tool.get_tool_definition(),
       self.add_relationship_table_tool.get_tool_definition(),
+      self.create_table_import_tool.get_tool_definition(),
+      self.run_table_import_tool.get_tool_definition(),
     ]
 
   def _get_semantic_memory_tool_definitions(self) -> list[dict[str, Any]]:
@@ -1291,6 +1304,19 @@ class GraphMCPTools:
             )
           )
         result = await self.write_cypher_tool.execute(arguments)
+        return result if return_raw else json.dumps(result, indent=2)
+
+      elif name in ("create-table-import", "run-table-import"):
+        tool = (
+          self.create_table_import_tool
+          if name == "create-table-import"
+          else self.run_table_import_tool
+        )
+        if tool is None:
+          raise ValueError(
+            self._tool_unavailable_reason(name, "MCP_SUBGRAPH_OPS_ENABLED")
+          )
+        result = await tool.execute(arguments)
         return result if return_raw else json.dumps(result, indent=2)
 
       elif name == "add-node-table":

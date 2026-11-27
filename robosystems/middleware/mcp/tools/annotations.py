@@ -161,6 +161,8 @@ WRITE_TOOL_HINTS: dict[str, ToolHints] = {
   "add-node-table": _ADDS_ONCE,
   "add-relationship-table": _ADDS_ONCE,
   "write-graph-cypher": _REPLACES_ONCE_PER_STATE,
+  "create-table-import": _ADDS,
+  "run-table-import": _ADDS_ONCE,
   # RoboInvestor.
   "create-security": _ADDS,
   "update-security": _REPLACES,

@@ -389,6 +389,11 @@ def build_instructions(
     explore_lines.append(
       "- Writes → `write-graph-cypher`, `add-node-table`, `add-relationship-table`."
     )
+  if not read_only and has("create-table-import"):
+    explore_lines.append(
+      "- Many rows at once → `create-table-import`, PUT a Parquet file per table, "
+      "then `run-table-import`. Rows are added; nothing is rebuilt."
+    )
   if len(explore_lines) > 1:
     sections.append(_block(*explore_lines))
 
