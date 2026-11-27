@@ -56,12 +56,18 @@ def main():
     action="store_true",
     help="Output credentials in JSON format",
   )
+  parser.add_argument(
+    "--credentials-file",
+    default=str(CREDENTIALS_FILE),
+    help="Path to credentials file (default: .local/config.json)",
+  )
 
   args = parser.parse_args()
+  credentials_path = Path(args.credentials_file).expanduser()
 
   context = CredentialContext(
     base_url=args.base_url,
-    credentials_path=CREDENTIALS_FILE,
+    credentials_path=credentials_path,
     force=args.force,
     default_name_prefix="Demo User",
     default_email_prefix="demo_user",
@@ -88,7 +94,7 @@ def main():
     granted = []
     for repo_type in args.repositories:
       if grant_repository_access(
-        auth_client, repo_type, credentials_path=CREDENTIALS_FILE
+        auth_client, repo_type, credentials_path=credentials_path
       ):
         granted.append(repo_type)
 

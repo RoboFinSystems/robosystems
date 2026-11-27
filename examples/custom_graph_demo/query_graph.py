@@ -301,7 +301,7 @@ def main() -> None:
     sys.exit(1)
 
   api_key = credentials.get("api_key")
-  graph_id = get_graph_id(DEFAULT_CREDENTIALS_FILE, DEMO_NAME)
+  graph_id = get_graph_id(credentials_path, DEMO_NAME)
 
   if not api_key or not graph_id:
     print_error("Missing API key or graph ID in credentials.")
