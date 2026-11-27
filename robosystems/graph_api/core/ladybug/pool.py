@@ -23,7 +23,7 @@ import ladybug as lbug
 from fastapi import HTTPException
 from fastapi import status as http_status
 
-from robosystems.config.storage.graph import graph_db_filename, graph_db_wal_filename
+from robosystems.config.storage.graph import graph_db_filename
 from robosystems.config.tuning import TuningConfig
 from robosystems.logger import logger
 
@@ -220,9 +220,9 @@ class LadybugConnectionPool:
     was in it will not survive a restart. This only reports it: by then the
     engine can no longer checkpoint, but the rows are still readable.
     """
-    db_path = self.base_path / graph_db_filename(database_name)
-    wal_path = self.base_path / graph_db_wal_filename(database_name)
     try:
+      db_path = _validated_database_path(self.base_path, database_name)
+      wal_path = db_path.with_name(db_path.name + ".wal")
       file_mtime = db_path.stat().st_mtime_ns
       if wal_path.exists():
         self._wal_seen[database_name] = file_mtime
@@ -232,7 +232,7 @@ class LadybugConnectionPool:
           "checkpoint: writes since the last checkpoint are readable now and "
           "will be lost when the database is next reopened"
         )
-    except OSError:
+    except OSError, HTTPException:
       pass
 
   def _close_connections_on_a_dropped_database(self, database_name: str) -> None:
