@@ -10,6 +10,8 @@ errors with redis-py clients, while background tasks requires them.
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from robosystems.config.valkey_registry import (
   ValkeyDatabase,
   ValkeyURLBuilder,
@@ -17,6 +19,17 @@ from robosystems.config.valkey_registry import (
   create_redis_client,
   get_redis_connection_params,
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_cached_auth_token():
+  """The builder caches the token per environment for the life of the process,
+  so one left by an earlier test would be read here in place of this test's."""
+  ValkeyURLBuilder._cached_auth_token = None
+  ValkeyURLBuilder._auth_token_environment = None
+  yield
+  ValkeyURLBuilder._cached_auth_token = None
+  ValkeyURLBuilder._auth_token_environment = None
 
 
 class TestProductionSSLHandling:
