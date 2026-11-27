@@ -207,11 +207,9 @@ procedure.
 ```bash
 just bootstrap-sso                        # admin profile resolved by profiles.sh, us-east-1
 just bootstrap-sso my-fork-admin eu-west-1
-OPERATOR_USER=jane just bootstrap-sso     # change who gets the Operator set
-AUDITOR_USER=auditor just bootstrap-sso   # give someone the Auditor set (none = remove)
 ```
 
-Creating the stack asks once; updating it shows the change set and asks before applying, like `bootstrap-oidc`. Writing `~/.aws/config` and repointing `.envrc` are asked for separately. It runs locally only: a workflow that could write permission sets could grant itself admin. The AdministratorAccess set is left alone on purpose.
+Creating the stack asks once; updating it shows the change set and asks before applying, like `bootstrap-oidc`. The sets are assigned to the `RoboSystemsOperators` and `RoboSystemsAuditors` groups the stack creates; the script offers to add you to `RoboSystemsOperators`, and anyone else gets access by group membership, with no stack change. Writing `~/.aws/config` and repointing `.envrc` are asked for separately. It runs locally only: a workflow that could write permission sets could grant itself admin. The AdministratorAccess set is left alone on purpose.
 
 `profiles.sh` is the helper the admin-only scripts (`bootstrap.sh`, `aws.sh`, `bedrock.sh`) source to resolve their profile: an argument, then `ROBOSYSTEMS_ADMIN_PROFILE`, then `robosystems-admin`, then `robosystems-sso` while the profiles are not yet split.
 

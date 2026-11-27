@@ -5,6 +5,10 @@ Description: RoboSystems Bootstrap - IAM Identity Center permission sets for day
 # operator out with one bad update. This stack adds the sets people work in day
 # to day, so the admin profile is needed only for bootstrap and infrastructure.
 #
+# Each set is assigned to a group the stack creates. Who is in a group is not
+# stack state: onboarding is adding a user to RoboSystemsOperators, offboarding
+# is removing them, and neither needs a stack update.
+#
 # Deployed locally by `just bootstrap-sso` (bin/setup/bootstrap-sso.sh), never
 # by a workflow: a deploy role able to write permission sets could grant itself
 # AdministratorAccess.
@@ -15,31 +19,16 @@ Parameters:
     Description: ARN of the IAM Identity Center instance (aws sso-admin list-instances)
     AllowedPattern: ^arn:aws[a-z-]*:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$
 
+  IdentityStoreId:
+    Type: String
+    Description: Identity store of that instance (aws sso-admin list-instances)
+    AllowedPattern: ^d-[0-9a-f]{10}$|^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$
+
   ServiceTag:
     Type: String
     Default: RoboSystems
     Description: Prefix for the permission set names and tags
     AllowedPattern: ^[A-Za-z0-9]+$
-
-  OperatorPrincipalId:
-    Type: String
-    Default: ""
-    Description: Identity Center user or group ID given the Operator set in this account (empty = no assignment)
-
-  OperatorPrincipalType:
-    Type: String
-    Default: USER
-    AllowedValues: [USER, GROUP]
-
-  AuditorPrincipalId:
-    Type: String
-    Default: ""
-    Description: Identity Center user or group ID given the Auditor set in this account (empty = no assignment)
-
-  AuditorPrincipalType:
-    Type: String
-    Default: USER
-    AllowedValues: [USER, GROUP]
 
   OperatorSessionDuration:
     Type: String
@@ -63,8 +52,6 @@ Parameters:
     AllowedPattern: ^[a-zA-Z0-9._-]{1,128}$
 
 Conditions:
-  AssignOperator: !Not [!Equals [!Ref OperatorPrincipalId, ""]]
-  AssignAuditor: !Not [!Equals [!Ref AuditorPrincipalId, ""]]
   AllowAthena: !Not [!Equals [!Ref AthenaResultsLocation, ""]]
 
 Resources:
@@ -223,25 +210,40 @@ Resources:
         - Key: Component
           Value: SSO
 
+  # ===========================================================================
+  # GROUPS - the sets are assigned to these; membership is managed outside
+  # ===========================================================================
+  OperatorsGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      IdentityStoreId: !Ref IdentityStoreId
+      DisplayName: !Sub ${ServiceTag}Operators
+      Description: !Sub Members get the ${ServiceTag}Operator permission set in this account
+
+  AuditorsGroup:
+    Type: AWS::IdentityStore::Group
+    Properties:
+      IdentityStoreId: !Ref IdentityStoreId
+      DisplayName: !Sub ${ServiceTag}Auditors
+      Description: !Sub Members get the ${ServiceTag}Auditor permission set in this account
+
   OperatorAssignment:
     Type: AWS::SSO::Assignment
-    Condition: AssignOperator
     Properties:
       InstanceArn: !Ref InstanceArn
       PermissionSetArn: !GetAtt OperatorPermissionSet.PermissionSetArn
-      PrincipalId: !Ref OperatorPrincipalId
-      PrincipalType: !Ref OperatorPrincipalType
+      PrincipalId: !GetAtt OperatorsGroup.GroupId
+      PrincipalType: GROUP
       TargetId: !Ref AWS::AccountId
       TargetType: AWS_ACCOUNT
 
   AuditorAssignment:
     Type: AWS::SSO::Assignment
-    Condition: AssignAuditor
     Properties:
       InstanceArn: !Ref InstanceArn
       PermissionSetArn: !GetAtt AuditorPermissionSet.PermissionSetArn
-      PrincipalId: !Ref AuditorPrincipalId
-      PrincipalType: !Ref AuditorPrincipalType
+      PrincipalId: !GetAtt AuditorsGroup.GroupId
+      PrincipalType: GROUP
       TargetId: !Ref AWS::AccountId
       TargetType: AWS_ACCOUNT
 
@@ -261,3 +263,9 @@ Outputs:
 
   AuditorPermissionSetName:
     Value: !Sub ${ServiceTag}Auditor
+
+  OperatorsGroupId:
+    Value: !GetAtt OperatorsGroup.GroupId
+
+  AuditorsGroupId:
+    Value: !GetAtt AuditorsGroup.GroupId

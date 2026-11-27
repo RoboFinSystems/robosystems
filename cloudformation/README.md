@@ -141,7 +141,8 @@ Parameters are documented in each template — read the `Parameters:` block for 
 
 **Key Resources**:
 - `AWS::SSO::PermissionSet` - Operator and Auditor
-- `AWS::SSO::Assignment` - each set to a user or group in this account, when a principal is given
+- `AWS::IdentityStore::Group` - `RoboSystemsOperators` and `RoboSystemsAuditors`; membership is managed outside the stack
+- `AWS::SSO::Assignment` - each set to its group in this account
 
 **Exports**:
 - `{StackName}-OperatorPermissionSetArn`, `-AuditorPermissionSetArn`

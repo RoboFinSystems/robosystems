@@ -315,7 +315,10 @@ The admin-only recipes resolve `robosystems-admin` themselves (`bin/setup/profil
 
 The stack is deployed from your machine, never by a workflow: a deploy role able to write permission sets could grant itself `AdministratorAccess`. It does not manage the `AdministratorAccess` set itself either, so no update can lock you out. Shorten that set's session to one hour in the console (IAM Identity Center → Permission sets → AdministratorAccess → Edit) so a forgotten admin login expires quickly.
 
-The Operator set goes to the user running the script on the first run; set `OPERATOR_USER=<user name>` or `AUDITOR_USER=<user name>` (or `none`) to change an assignment on a later run.
+Each set is assigned to a group the stack creates, `RoboSystemsOperators` and `RoboSystemsAuditors`, and the script offers to add you to `RoboSystemsOperators`. Membership is not stack state, so giving someone access never needs a stack update:
+
+- **Add a person**: IAM Identity Center → Users → Add user, with "send an email with password setup instructions"; add them to `RoboSystemsOperators` (or `RoboSystemsAuditors`). They set a password, register MFA at first sign-in when Settings → Authentication requires it, and run `aws configure sso --profile robosystems-sso`, choosing `RoboSystemsOperator`. Only someone you also assign `AdministratorAccess` gets a `robosystems-admin` profile.
+- **Remove a person**: remove them from the group and disable the user. Credentials already issued stay valid until their session ends, up to the set's session duration.
 
 ## Deploy
 

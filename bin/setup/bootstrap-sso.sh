@@ -5,7 +5,9 @@
 #
 # Deploys cloudformation/bootstrap-sso.yaml: the RoboSystemsOperator (daily)
 # and RoboSystemsAuditor permission sets in IAM Identity Center, assigned in
-# this account, then splits the CLI into two profiles on one SSO session:
+# this account to the RoboSystemsOperators and RoboSystemsAuditors groups.
+# Offers to add you to RoboSystemsOperators, then splits the CLI into two
+# profiles on one SSO session:
 #
 #   robosystems-admin   AdministratorAccess - bootstrap and infrastructure only
 #   robosystems-sso     RoboSystemsOperator - everything else; .envrc points here
@@ -14,15 +16,11 @@
 # the change set and asks before applying. Every edit to ~/.aws/config or
 # .envrc is asked for too.
 #
+# Giving someone else access is group membership, not a stack change
+# (IAM Identity Center > Groups in the console).
+#
 # USAGE:
 #   just bootstrap-sso [admin-profile] [region]
-#
-# ENVIRONMENT:
-#   OPERATOR_USER  Identity Center user name to give the Operator set
-#                  ("none" for no assignment); default: the stack's current
-#                  assignment, else you
-#   AUDITOR_USER   Same for the Auditor set; default: the current assignment,
-#                  else none
 #
 # =============================================================================
 
@@ -55,6 +53,7 @@ TEMPLATE="cloudformation/bootstrap-sso.yaml"
 SERVICE_TAG="RoboSystems"
 OPERATOR_SET="${SERVICE_TAG}Operator"
 AUDITOR_SET="${SERVICE_TAG}Auditor"
+OPERATORS_GROUP="${SERVICE_TAG}Operators"
 
 export AWS_PROFILE="$ADMIN_PROFILE"
 export AWS_REGION
@@ -87,84 +86,6 @@ load_identity_center() {
     print_success "Identity Center ${INSTANCE_ARN##*/}, account ${ACCOUNT_ID}"
 }
 
-stack_param() {
-    aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
-        --query "Stacks[0].Parameters[?ParameterKey=='$1'].ParameterValue | [0]" \
-        --output text 2>/dev/null | grep -v '^None$' || true
-}
-
-user_id_for() {
-    aws identitystore get-user-id \
-        --identity-store-id "$IDENTITY_STORE_ID" \
-        --alternate-identifier "{\"UniqueAttribute\":{\"AttributePath\":\"userName\",\"AttributeValue\":\"$1\"}}" \
-        --query UserId --output text 2>/dev/null || echo ""
-}
-
-user_name_for() {
-    aws identitystore describe-user --identity-store-id "$IDENTITY_STORE_ID" --user-id "$1" \
-        --query UserName --output text 2>/dev/null || echo "$1"
-}
-
-# Prints the principal ID for a user name, "" for "none"; exits on an unknown name.
-resolve_user() {
-    local name="$1" id
-    if [ -z "$name" ] || [ "$name" = "none" ]; then
-        echo ""
-        return 0
-    fi
-    id=$(user_id_for "$name")
-    if [ -z "$id" ] || [ "$id" = "None" ]; then
-        print_error "No Identity Center user named '${name}'"
-        exit 1
-    fi
-    echo "$id"
-}
-
-choose_principals() {
-    print_header "Assignments"
-
-    OPERATOR_PRINCIPAL_ID=$(stack_param OperatorPrincipalId)
-    OPERATOR_PRINCIPAL_TYPE=$(stack_param OperatorPrincipalType)
-    AUDITOR_PRINCIPAL_ID=$(stack_param AuditorPrincipalId)
-    AUDITOR_PRINCIPAL_TYPE=$(stack_param AuditorPrincipalType)
-
-    if [ -n "${OPERATOR_USER:-}" ]; then
-        OPERATOR_PRINCIPAL_ID=$(resolve_user "$OPERATOR_USER")
-        OPERATOR_PRINCIPAL_TYPE=USER
-    elif [ -z "$OPERATOR_PRINCIPAL_ID" ] && [ "$STACK_STATUS" = "" ]; then
-        # First run: offer the set to whoever is running this. An SSO
-        # session's name is the Identity Center user name.
-        local me
-        me=$(aws sts get-caller-identity --query Arn --output text | awk -F/ '{print $NF}')
-        read -r -p "Give ${OPERATOR_SET} to '${me}'? (Y/n, or type another user name): " reply
-        case "$reply" in
-            ""|[Yy]) OPERATOR_PRINCIPAL_ID=$(resolve_user "$me") ;;
-            [Nn]) OPERATOR_PRINCIPAL_ID="" ;;
-            *) OPERATOR_PRINCIPAL_ID=$(resolve_user "$reply") ;;
-        esac
-        OPERATOR_PRINCIPAL_TYPE=USER
-    fi
-
-    if [ -n "${AUDITOR_USER:-}" ]; then
-        AUDITOR_PRINCIPAL_ID=$(resolve_user "$AUDITOR_USER")
-        AUDITOR_PRINCIPAL_TYPE=USER
-    fi
-
-    OPERATOR_PRINCIPAL_TYPE="${OPERATOR_PRINCIPAL_TYPE:-USER}"
-    AUDITOR_PRINCIPAL_TYPE="${AUDITOR_PRINCIPAL_TYPE:-USER}"
-
-    if [ -n "$OPERATOR_PRINCIPAL_ID" ]; then
-        print_info "${OPERATOR_SET}: $(user_name_for "$OPERATOR_PRINCIPAL_ID")"
-    else
-        print_info "${OPERATOR_SET}: no one"
-    fi
-    if [ -n "$AUDITOR_PRINCIPAL_ID" ]; then
-        print_info "${AUDITOR_SET}:  $(user_name_for "$AUDITOR_PRINCIPAL_ID")"
-    else
-        print_info "${AUDITOR_SET}:  no one (set AUDITOR_USER=<user name> to assign)"
-    fi
-}
-
 # The cost review queries the CUR through Athena; grant result writes only
 # where the workgroup already sends them.
 detect_athena_results() {
@@ -185,18 +106,12 @@ write_params() {
     jq -n \
         --arg instance "$INSTANCE_ARN" \
         --arg service "$SERVICE_TAG" \
-        --arg op_id "$OPERATOR_PRINCIPAL_ID" \
-        --arg op_type "$OPERATOR_PRINCIPAL_TYPE" \
-        --arg au_id "$AUDITOR_PRINCIPAL_ID" \
-        --arg au_type "$AUDITOR_PRINCIPAL_TYPE" \
+        --arg store "$IDENTITY_STORE_ID" \
         --arg athena "$ATHENA_RESULTS" \
         '[
           {ParameterKey: "InstanceArn", ParameterValue: $instance},
           {ParameterKey: "ServiceTag", ParameterValue: $service},
-          {ParameterKey: "OperatorPrincipalId", ParameterValue: $op_id},
-          {ParameterKey: "OperatorPrincipalType", ParameterValue: $op_type},
-          {ParameterKey: "AuditorPrincipalId", ParameterValue: $au_id},
-          {ParameterKey: "AuditorPrincipalType", ParameterValue: $au_type},
+          {ParameterKey: "IdentityStoreId", ParameterValue: $store},
           {ParameterKey: "AthenaResultsLocation", ParameterValue: $athena}
         ]' > "$PARAMS_FILE"
 }
@@ -293,6 +208,48 @@ update_stack() {
 }
 
 # =============================================================================
+# MEMBERSHIP
+# =============================================================================
+
+# An SSO session's name is the Identity Center user name.
+join_operators() {
+    print_header "Membership"
+    local me user_id group_id membership
+    me=$(aws sts get-caller-identity --query Arn --output text | awk -F/ '{print $NF}')
+    user_id=$(aws identitystore get-user-id --identity-store-id "$IDENTITY_STORE_ID" \
+        --alternate-identifier "{\"UniqueAttribute\":{\"AttributePath\":\"userName\",\"AttributeValue\":\"${me}\"}}" \
+        --query UserId --output text 2>/dev/null || echo "")
+    group_id=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
+        --query "Stacks[0].Outputs[?OutputKey=='OperatorsGroupId'].OutputValue | [0]" --output text)
+    if [ -z "$user_id" ] || [ "$user_id" = "None" ]; then
+        print_warning "Could not find Identity Center user '${me}'; add yourself to ${OPERATORS_GROUP} in the console"
+        IN_OPERATORS=false
+        return 0
+    fi
+
+    membership=$(aws identitystore get-group-membership-id --identity-store-id "$IDENTITY_STORE_ID" \
+        --group-id "$group_id" --member-id "UserId=${user_id}" \
+        --query MembershipId --output text 2>/dev/null || echo "")
+    if [ -n "$membership" ] && [ "$membership" != "None" ]; then
+        print_success "${me} is in ${OPERATORS_GROUP}"
+        IN_OPERATORS=true
+        return 0
+    fi
+
+    read -r -p "Add ${me} to ${OPERATORS_GROUP} (gets ${OPERATOR_SET})? (Y/n): " -n 1 reply
+    echo ""
+    if [[ $reply =~ ^[Nn]$ ]]; then
+        print_info "Not added"
+        IN_OPERATORS=false
+        return 0
+    fi
+    aws identitystore create-group-membership --identity-store-id "$IDENTITY_STORE_ID" \
+        --group-id "$group_id" --member-id "UserId=${user_id}" >/dev/null
+    print_success "Added ${me} to ${OPERATORS_GROUP}"
+    IN_OPERATORS=true
+}
+
+# =============================================================================
 # CLI PROFILES
 # =============================================================================
 
@@ -310,8 +267,8 @@ copy_profile() {
 split_profiles() {
     print_header "CLI Profiles"
 
-    if [ -z "$OPERATOR_PRINCIPAL_ID" ]; then
-        print_info "${OPERATOR_SET} is assigned to no one here; leaving profiles alone"
+    if [ "$IN_OPERATORS" != true ]; then
+        print_info "You are not in ${OPERATORS_GROUP}; leaving profiles alone"
         return 0
     fi
 
@@ -416,7 +373,6 @@ main() {
     STACK_STATUS=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" \
         --query 'Stacks[0].StackStatus' --output text 2>/dev/null || echo "")
 
-    choose_principals
     detect_athena_results
     write_params
 
@@ -428,6 +384,7 @@ main() {
         update_stack
     fi
 
+    join_operators
     split_profiles
     point_envrc_at_operator
     verify_operator
