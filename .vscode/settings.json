@@ -4,6 +4,7 @@
   "python.testing.pytestEnabled": true,
   "files.exclude": {
     ".venv/**": true,
+    "**/.playwright-mcp/**": true,
     "**/__pycache__/**": true,
     "**/.pytest_cache/**": true,
     "**/.ruff_cache/**": true,
