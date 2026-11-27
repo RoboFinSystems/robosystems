@@ -880,10 +880,25 @@ class GraphClient(BaseGraphClient):
     Targets ``_database_name`` when the factory set one (subgraphs route to a
     database name distinct from the graph ID), else ``graph_id``.
     """
-    database = getattr(self, "_database_name", None) or self.graph_id or "sec"
+    database = self._bound_database()
 
     result = cast(dict[str, Any], await self.query(cypher, database, params))
     return result.get("data", [])
+
+  def _bound_database(self) -> str:
+    """The database this client was created for.
+
+    The factory records it as ``_database_name`` (a subgraph's own database)
+    and ``_graph_id``; a caller may bind ``graph_id`` itself. ``sec`` is only
+    for a client bound to nothing, never a stand-in for a graph the factory
+    was asked for.
+    """
+    return (
+      getattr(self, "_database_name", None)
+      or self.graph_id
+      or getattr(self, "_graph_id", None)
+      or "sec"
+    )
 
   async def execute_single(
     self, cypher: str, params: dict[str, Any] | None = None
@@ -894,7 +909,7 @@ class GraphClient(BaseGraphClient):
 
   async def get_schema(self) -> list[dict[str, Any]]:
     """Get the bound graph's tables and their properties."""
-    graph_id = self.graph_id or "sec"
+    graph_id = self._bound_database()
 
     response = await self._request("GET", f"/databases/{graph_id}/schema")
     schema_data = response.json()
@@ -1197,7 +1212,7 @@ class GraphClient(BaseGraphClient):
 
     Defaults to the client's bound graph when ``graph_id`` is omitted.
     """
-    target_graph = graph_id or self.graph_id or "sec"
+    target_graph = graph_id or self._bound_database()
     return cast(dict[str, Any], await self.query(ddl, target_graph))
 
   async def node_exists(
@@ -1207,7 +1222,7 @@ class GraphClient(BaseGraphClient):
 
     Filter values are passed as query parameters, never interpolated.
     """
-    database = self.graph_id or "sec"
+    database = self._bound_database()
 
     where_clause = ""
     params = {}
