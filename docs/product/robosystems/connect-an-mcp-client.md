@@ -20,7 +20,7 @@ There are two ways in. Almost everyone wants the first.
 | | For | How |
 |---|---|---|
 | **Connect** | Anyone using an AI assistant | Paste the address above and sign in. This page |
-| **Build** | Developers working across graphs, or from scripts | A local bridge or an API key. [For developers](#for-developers), below |
+| **Build** | Developers working across graphs, or from scripts | An API key. [For developers](#for-developers), below |
 
 ## Add the address to your client
 
@@ -90,25 +90,34 @@ Two routes use an API key instead of a sign-in. Create keys in the app; how they
 
 ### One connection for every graph
 
-The RoboSystems bridge is a small program your MCP client runs locally. Give it a key and it reaches every graph that key covers through one connection: the client lists your graphs, looks up any graph's tools and calls them, naming the graph each time. A subgraph is usable the moment it is created, with nothing to add or reconnect.
+One address reaches every graph your key covers through a single connection: the client lists your graphs, looks up any graph's tools and calls them, naming the graph each time. A subgraph is usable the moment it is created, with nothing to add or reconnect.
+
+```text
+https://api.robosystems.ai/v1/mcp/graphs
+```
+
+It takes a key that covers all your graphs, in the `X-API-Key` header:
+
+```bash
+claude mcp add --transport http robosystems \
+  https://api.robosystems.ai/v1/mcp/graphs \
+  --header "X-API-Key: <your key>"
+```
 
 ```json
-{
-  "mcpServers": {
-    "robosystems-bridge": {
-      "command": "npx",
-      "args": ["-y", "@robosystems/mcp@latest"],
-      "env": { "ROBOSYSTEMS_API_KEY": "<your key>" }
-    }
-  }
+"robosystems": {
+  "url": "https://api.robosystems.ai/v1/mcp/graphs",
+  "headers": { "X-API-Key": "<your key>" }
 }
 ```
 
-It can be limited to named graphs, and a graph or the whole connection can be made read-only. It needs Node.js 22 or later and a client that runs local servers, such as Claude Code, Claude Desktop, Cursor or VS Code; it does not work in claude.ai or ChatGPT. Setup and options are in [The MCP Bridge](https://robosystems.ai/docs/technical/the-mcp-bridge).
+It can be limited to named graphs, and a graph or the whole connection can be made read-only; the settings are in [One connection for every graph](https://robosystems.ai/docs/technical/ai-operators-and-mcp#one-connection-for-every-graph). It works in clients that can send a header, such as Claude Code, Cursor and VS Code; claude.ai and ChatGPT sign in instead, with the address at the top of this page.
+
+A client that only runs local programs, such as Claude Desktop with a key, reaches the same connection through [the MCP bridge](https://robosystems.ai/docs/technical/the-mcp-bridge), a small program it starts with `npx`.
 
 ### Scripts and CI
 
-A graph's own address also accepts a key in the `X-API-Key` header, so a script or CI job can connect without a browser. The app's **MCP** page generates a key scoped to that graph. A key never goes in the address, and the general address at the top of this page takes a sign-in only.
+A graph's own address also accepts a key in the `X-API-Key` header, so a script or CI job can connect to one graph without a browser and see that graph's tools directly. The app's **MCP** page generates a key scoped to that graph. A key never goes in the address, and the general address at the top of this page takes a sign-in only.
 
 ```bash
 claude mcp add --transport http robosystems-kg123 \
@@ -130,7 +139,7 @@ claude mcp add --transport http robosystems-kg123 \
 | Ask your assistant about your books or any graph | The address at the top of this page. When in doubt, this one |
 | Read SEC filings in Claude or ChatGPT with nothing to paste | The directory listing |
 | Keep two graphs connected in one chat client | Each graph's own address, one connection each |
-| Work across many graphs, or create and use subgraphs as you go | The bridge |
+| Work across many graphs, or create and use subgraphs as you go | The every-graph address with an API key |
 | Connect from a script or CI job | A graph's own address with an API key |
 
 ## Try asking
@@ -144,5 +153,6 @@ Once connected, start by letting the client orient itself:
 ## Go deeper
 
 - [Connecting from MCP clients](https://robosystems.ai/docs/technical/ai-operators-and-mcp#connecting-from-mcp-clients): the server's sign-in, transport and per-graph addresses in detail.
-- [The MCP Bridge](https://robosystems.ai/docs/technical/the-mcp-bridge): one local connection for every graph a key covers.
+- [One connection for every graph](https://robosystems.ai/docs/technical/ai-operators-and-mcp#one-connection-for-every-graph): the four tools and the settings that narrow a connection.
+- [The MCP Bridge](https://robosystems.ai/docs/technical/the-mcp-bridge): the same connection for a client that only runs local programs.
 - [API key lifecycle](https://robosystems.ai/docs/technical/authentication-and-api-keys#api-key-lifecycle): creating, scoping and revoking the keys scripts connect with.

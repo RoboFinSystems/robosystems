@@ -77,6 +77,7 @@ class TestSubscriptionRateLimits:
     # The graph-agnostic OAuth transport is tenant-scoped through its grant.
     assert should_use_subscription_limits("/v1/mcp")
     assert should_use_subscription_limits("/v1/mcp/roboledger")
+    assert should_use_subscription_limits("/v1/mcp/graphs")
     assert should_use_subscription_limits("/v1/graphs/sec/entity/")
 
     # Non-graph endpoints that should use subscription limits
@@ -349,6 +350,32 @@ class TestSubscriptionAwareRateLimiting:
 
     assert mock_request.state.rate_limit_tier == "base"
 
+  @patch("robosystems.middleware.rate_limits.rate_limiting.get_user_from_request")
+  @patch(
+    "robosystems.middleware.rate_limits.rate_limiting.rate_limit_cache.check_rate_limit"
+  )
+  def test_multi_graph_mcp_route_charges_the_graph_a_call_entered(
+    self, mock_check_rate_limit, mock_get_user, mock_request
+  ):
+    """POST /v1/mcp/graphs names its graph per call. A call that was
+    authorized on a graph draws on that graph's budget; a request that
+    entered none (the handshake, a refused graph) draws on the caller's."""
+    mock_get_user.return_value = "user_456"
+    mock_check_rate_limit.return_value = (True, 4)
+    mock_request.url.path = "/v1/mcp/graphs"
+    mock_request.method = "POST"
+
+    mock_request.state.auth_graph_id = "kg1a2b3c4d5e6f7a8b_dev"
+    subscription_aware_rate_limit_dependency(mock_request)
+    assert (
+      mock_check_rate_limit.call_args.args[0]
+      == "graph_sub:kg1a2b3c4d5e6f7a8b:graph_mcp"
+    )
+
+    mock_request.state.auth_graph_id = None
+    subscription_aware_rate_limit_dependency(mock_request)
+    assert mock_check_rate_limit.call_args.args[0] == "user_sub:user_456:graph_mcp"
+
   def test_agnostic_mcp_routes_are_the_mcp_category(self):
     """Neither graph-agnostic transport carries a graph in its path; both
     must land in the MCP bucket, not the generic API limiter."""
@@ -356,6 +383,7 @@ class TestSubscriptionAwareRateLimiting:
     assert (
       get_endpoint_category("/v1/mcp/roboledger", "POST") == EndpointCategory.GRAPH_MCP
     )
+    assert get_endpoint_category("/v1/mcp/graphs", "POST") == EndpointCategory.GRAPH_MCP
 
   def test_mcp_endpoint_category(self):
     """Test MCP endpoints get correct category and limits."""

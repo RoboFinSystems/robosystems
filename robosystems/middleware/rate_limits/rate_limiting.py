@@ -641,7 +641,8 @@ def subscription_aware_rate_limit_dependency(request: Request):
   # proven authorized on it. Otherwise the caller's own budget applies.
   graph_id = extract_graph_id(request.url.path) if user_id else None
   if graph_id is None and user_id:
-    # The graph-agnostic MCP route: use the OAuth grant's published graph.
+    # An MCP route with no graph in its path: use the graph the caller was
+    # authorized on (the OAuth grant's, or the one this call names).
     published = getattr(request.state, "auth_graph_id", None)
     if isinstance(published, str):
       graph_id = published

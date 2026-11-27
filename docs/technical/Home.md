@@ -39,7 +39,7 @@ The contracts every integration relies on, and the core graph surface.
 The MCP server, the operators, and the document and memory planes.
 
 - **[AI Operators & MCP](AI-Operators-and-MCP.md)** - The MCP surface, connecting clients, and the operator endpoint
-- **[The MCP Bridge](The-MCP-Bridge.md)** - One local connection for every graph an API key covers, subgraphs included
+- **[The MCP Bridge](The-MCP-Bridge.md)** - The MCP endpoints for a client that only runs local servers: every graph an API key covers, or one
 - **[Search & AI Retrieval](Search-and-AI-Retrieval.md)** - Index documents and retrieve them, and semantic memory
 - **[Document Management](Document-Management.md)** - The document store on a graph
 

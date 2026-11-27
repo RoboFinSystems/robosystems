@@ -230,7 +230,7 @@ For Cursor / VS Code (`mcp.json`):
 }
 ```
 
-Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. To reach several graphs through one local connection, or from a client without HTTP transport, use [the MCP bridge](The-MCP-Bridge.md).
+Against production the same URL shape is `https://api.robosystems.ai/v1/graphs/sec/mcp`. To reach several graphs through one connection, use [`/v1/mcp/graphs`](AI-Operators-and-MCP.md#one-connection-for-every-graph); from a client without HTTP transport, use [the MCP bridge](The-MCP-Bridge.md).
 
 A key never travels in the URL: a credential in the query string is rejected. The hosted sign-in (OAuth) path, used by claude.ai and Claude Desktop custom connectors (Customize → Connectors) and by the directory listings, is on [AI Operators & MCP](AI-Operators-and-MCP.md).
 

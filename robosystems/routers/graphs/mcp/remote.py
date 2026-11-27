@@ -1024,16 +1024,14 @@ async def _handle_tools_call(
   return _rpc_result(msg_id, _to_tool_result(result))
 
 
-async def dispatch_jsonrpc(
+async def read_jsonrpc_request(
   request: Request,
-  graph_id: str,
-  current_user: User,
-  profile: RouteProfile = UNIVERSAL_ROUTE,
-) -> Response:
-  """Parse and dispatch one JSON-RPC message (the transport's whole surface).
+) -> Response | tuple[Any, str, dict[str, Any]]:
+  """Read one JSON-RPC request off the wire as ``(id, method, params)``.
 
-  ``profile`` is the route's cut of the tool list: what it withholds from
-  ``initialize`` and ``tools/list``, and what it refuses on ``tools/call``.
+  Anything that is not a request to dispatch comes back as the response to
+  send instead: a malformed envelope, a batch, an unsupported protocol
+  version, or a notification.
   """
   try:
     message = await request.json()
@@ -1094,6 +1092,24 @@ async def dispatch_jsonrpc(
   params = message.get("params") or {}
   if not isinstance(params, dict):
     return _rpc_error(msg_id, INVALID_PARAMS, "Invalid params: expected an object")
+  return msg_id, method, params
+
+
+async def dispatch_jsonrpc(
+  request: Request,
+  graph_id: str,
+  current_user: User,
+  profile: RouteProfile = UNIVERSAL_ROUTE,
+) -> Response:
+  """Parse and dispatch one JSON-RPC message (the transport's whole surface).
+
+  ``profile`` is the route's cut of the tool list: what it withholds from
+  ``initialize`` and ``tools/list``, and what it refuses on ``tools/call``.
+  """
+  parsed = await read_jsonrpc_request(request)
+  if isinstance(parsed, Response):
+    return parsed
+  msg_id, method, params = parsed
 
   try:
     if method == "initialize":

@@ -21,9 +21,10 @@ def should_use_subscription_limits(path: str) -> bool:
   if path.startswith("/extensions/"):
     return True
 
-  # The graph-agnostic MCP transports carry no graph in their path; they are
-  # tenant-scoped through the OAuth grant and take the MCP buckets.
-  if path in ("/v1/mcp", "/v1/mcp/roboledger"):
+  # These MCP transports carry no graph in their path; they are tenant-scoped
+  # through the OAuth grant, or per call on /v1/mcp/graphs, and take the MCP
+  # buckets.
+  if path in ("/v1/mcp", "/v1/mcp/roboledger", "/v1/mcp/graphs"):
     return True
 
   if path.startswith("/v1/") and len(path.split("/")) >= 4:
