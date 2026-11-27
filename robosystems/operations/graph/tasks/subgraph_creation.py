@@ -30,6 +30,7 @@ class SubgraphCreationTask(BaseTask):
 
     parent_graph_id = self.params["parent_graph_id"]
     subgraph_name = self.params["subgraph_name"]
+    display_name = self.params.get("display_name")
     description = self.params.get("description")
     fork_data = self.params.get("fork_data", False)
 
@@ -59,6 +60,7 @@ class SubgraphCreationTask(BaseTask):
         parent_graph=parent_graph,
         user=user,
         name=subgraph_name,
+        display_name=display_name,
         description=description,
         fork_parent=fork_data,
         fork_options=fork_options,

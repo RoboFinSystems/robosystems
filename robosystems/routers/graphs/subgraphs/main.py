@@ -275,7 +275,8 @@ async def create_subgraph(
       params={
         "parent_graph_id": graph_id,
         "subgraph_name": request.name,
-        "description": request.display_name,
+        "display_name": request.display_name,
+        "description": request.description,
         "fork_data": True,
       },
     )
@@ -305,7 +306,8 @@ async def create_subgraph(
     parent_graph=parent_graph,
     user=current_user,
     name=request.name,
-    description=request.display_name,
+    display_name=request.display_name,
+    description=request.description,
     subgraph_type=request.subgraph_type.value if request.subgraph_type else "static",
     metadata=request.metadata,
     fork_parent=False,
