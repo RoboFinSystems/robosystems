@@ -27,6 +27,7 @@ from .oauth import (
   validate_oauth_access_token,
 )
 from .utils import (
+  is_graph_scoped_api_key,
   validate_api_key,
   validate_api_key_with_graph,
   validate_repository_access,
@@ -483,39 +484,9 @@ async def _resolve_user_with_graph(
     )
 
   if api_key:
-    user = await asyncio.to_thread(
-      validate_api_key_with_graph,
-      api_key,
-      graph_id,
-      allow_deprovisioned=allow_deprovisioned,
+    return await authorize_api_key_on_graph(
+      request, api_key, graph_id, allow_deprovisioned=allow_deprovisioned
     )
-    if user:
-      _stash_api_key_identity(request, api_key, user)
-      SecurityAuditLogger.log_auth_success(
-        user_id=str(user.id),
-        ip_address=client_ip,
-        user_agent=user_agent,
-        auth_method="api_key",
-      )
-      _publish_graph_authorization(request, graph_id)
-      return user
-    else:
-      SecurityAuditLogger.log_security_event(
-        event_type=SecurityEventType.API_KEY_INVALID,
-        ip_address=client_ip,
-        user_agent=user_agent,
-        endpoint=endpoint,
-        details={
-          "api_key_prefix": api_key[:8] if api_key else "",
-          "graph_id": graph_id,
-        },
-        risk_level="high",
-      )
-      raise HTTPException(
-        status_code=status.HTTP_403_FORBIDDEN,
-        detail="Invalid API key or access denied to graph",
-        headers={"WWW-Authenticate": "ApiKey"},
-      )
 
   SecurityAuditLogger.log_auth_failure(
     reason="No authentication provided",
@@ -527,6 +498,115 @@ async def _resolve_user_with_graph(
     status_code=status.HTTP_401_UNAUTHORIZED,
     detail="Authentication required",
     headers={"WWW-Authenticate": "Bearer, ApiKey"},
+  )
+
+
+async def authorize_api_key_on_graph(
+  request: Request,
+  api_key: str,
+  graph_id: str,
+  *,
+  allow_deprovisioned: bool = False,
+) -> User:
+  """Confirm an API key reaches ``graph_id`` and return its user, else 403.
+
+  The key branch of ``_resolve_user_with_graph``, and the per-call check of
+  the multi-graph MCP route, whose graph arrives in the request body. Only
+  the key is read: a bearer token on the same request is ignored.
+  """
+  user = await asyncio.to_thread(
+    validate_api_key_with_graph,
+    api_key,
+    graph_id,
+    allow_deprovisioned=allow_deprovisioned,
+  )
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  if user:
+    _stash_api_key_identity(request, api_key, user)
+    SecurityAuditLogger.log_auth_success(
+      user_id=str(user.id),
+      ip_address=client_ip,
+      user_agent=user_agent,
+      auth_method="api_key",
+    )
+    _publish_graph_authorization(request, graph_id)
+    return user
+
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.API_KEY_INVALID,
+    ip_address=client_ip,
+    user_agent=user_agent,
+    endpoint=str(request.url.path),
+    details={
+      "api_key_prefix": api_key[:8] if api_key else "",
+      "graph_id": graph_id,
+    },
+    risk_level="high",
+  )
+  raise HTTPException(
+    status_code=status.HTTP_403_FORBIDDEN,
+    detail="Invalid API key or access denied to graph",
+    headers={"WWW-Authenticate": "ApiKey"},
+  )
+
+
+async def get_account_api_key_user(
+  request: Request,
+  api_key: str = Security(API_KEY_HEADER),
+) -> User:
+  """The multi-graph MCP route's only credential: an account-wide API key.
+
+  The route names its graph per call, so a credential that carries one (an
+  OAuth grant, a graph-scoped key) has its own URL and is refused here.
+  """
+  client_ip = request.client.host if request.client else None
+  user_agent = request.headers.get("user-agent")
+  endpoint = str(request.url.path)
+
+  if not api_key:
+    SecurityAuditLogger.log_auth_failure(
+      reason="No API key provided",
+      ip_address=client_ip,
+      user_agent=user_agent,
+      endpoint=endpoint,
+    )
+    raise HTTPException(
+      status_code=status.HTTP_401_UNAUTHORIZED,
+      detail="This endpoint takes an account-wide API key in the X-API-Key header",
+      headers={"WWW-Authenticate": "ApiKey"},
+    )
+
+  user = await asyncio.to_thread(validate_api_key, api_key)
+  if user:
+    _stash_api_key_identity(request, api_key, user)
+    SecurityAuditLogger.log_auth_success(
+      user_id=str(user.id),
+      ip_address=client_ip,
+      user_agent=user_agent,
+      auth_method="api_key",
+    )
+    return user
+
+  SecurityAuditLogger.log_security_event(
+    event_type=SecurityEventType.API_KEY_INVALID,
+    ip_address=client_ip,
+    user_agent=user_agent,
+    endpoint=endpoint,
+    details={"api_key_prefix": api_key[:8]},
+    risk_level="high",
+  )
+  # Said on the key's shape alone, so it confirms nothing about the key.
+  detail = (
+    "A graph-scoped API key connects at /v1/graphs/{graph_id}/mcp; this "
+    "endpoint takes an account-wide key"
+    if is_graph_scoped_api_key(api_key)
+    else "Invalid API key"
+  )
+  raise HTTPException(
+    status_code=status.HTTP_401_UNAUTHORIZED,
+    detail=detail,
+    headers={"WWW-Authenticate": "ApiKey"},
   )
 
 

@@ -14,7 +14,7 @@ Every graph is an MCP server, served over MCP's Streamable HTTP transport direct
 >
 > **API key:** `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp` — the graph is in the URL (`sec` for the public SEC repository, your graph id for a tenant graph; a subgraph id such as `kg…_dev` is just another URL). The key goes in the same `X-API-Key` header the REST API uses. Keys can be account-wide or **graph-scoped** — valid only for one graph and its subgraphs.
 
-To work across several graphs from one connection, or to create subgraphs and use them without adding a connection for each, run [the MCP bridge](The-MCP-Bridge.md): a local program that takes an API key and reaches every graph the key covers.
+To work across several graphs from one connection, or to create subgraphs and use them without adding a connection for each, connect to `https://api.robosystems.ai/v1/mcp/graphs` with an account-wide API key: [one connection for every graph](#one-connection-for-every-graph), below. A client that only runs local servers reaches the same thing through [the MCP bridge](The-MCP-Bridge.md).
 
 The OAuth path is what a directory listing uses — [RoboSystems SEC](https://claude.ai/directory/robosystems-sec) in Claude's connector directory and the [RoboSystems plugin](https://chatgpt.com/plugins/plugin_asdk_app_6a8f6d7d50d081918787990d4cab45ca) in ChatGPT's plugin directory both connect this way — and it works the same as a custom connector or from any OAuth-capable MCP client. Registration is automatic: clients with a hosted client-metadata document (Claude, Claude Code) are recognised from it; others register dynamically (RFC 7591). Access tokens are bound to the MCP URL, refresh tokens rotate, and every authorization is revocable — a password change or account deactivation revokes them all.
 
@@ -57,7 +57,7 @@ Every MCP route (the three are listed [below](#the-mcp-tool-surface)) speaks JSO
 
 MCP is the shared tool layer. Every entry path — the in-product Operator endpoint, external MCP clients, and in-process operators — calls the *same* tool classes in `middleware/mcp/tools/`. There is one implementation per tool; only the transport differs.
 
-The surface is served on three routes of the same transport:
+The surface is served on four routes of the same transport:
 
 | Method | Path | Auth | Purpose |
 | --- | --- | --- | --- |
@@ -65,7 +65,9 @@ The surface is served on three routes of the same transport:
 | `POST` | `/v1/graphs/{graph_id}/mcp` | `X-API-Key`, or an OAuth bearer bound to this URL | Graph fixed by the URL |
 | `POST` | `/v1/mcp/roboledger` | OAuth bearer | A RoboLedger tenant graph, chosen at consent, with the [route's exclusions](#the-roboledger-route) withheld. It exists because a directory listing freezes one tool list per URL, and a plugin gets one URL |
 
-All three take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
+| `POST` | `/v1/mcp/graphs` | `X-API-Key` (account-wide) | Every graph the key reaches; each call names its graph ([below](#one-connection-for-every-graph)) |
+
+All four take MCP JSON-RPC: `initialize`, `tools/list`, and `tools/call` with a tool `name` plus an `arguments` object.
 
 ```json
 {
@@ -280,6 +282,30 @@ Most extension writes are generated from the `OperationSpec`s that back `/extens
 #### Subgraphs
 
 A tenant subgraph has no extensions OLTP schema, no connections and no materialization, so it serves a fixed profile — schema and Cypher in both directions, plus memory and the way back out: `get-graph-info`, `get-graph-schema`, `get-example-queries`, `read-graph-cypher`, `write-graph-cypher`, `add-node-table`, `add-relationship-table`, `create-table-import`, `run-table-import`, `recall`, `forget`, and `list-subgraphs`. Any other tool is withheld from `tools/list` and refused on call. (`remember` and `update-memory` are in the profile but not served, since a subgraph has no memory store of its own.) A subgraph of a shared repository follows the repository's catalog instead.
+
+#### One connection for every graph
+
+`/v1/mcp/graphs` reaches every graph an account-wide API key covers: your own graphs, their subgraphs and the shared repositories you subscribe to. It serves four tools, the same on every connection, and a graph's own tools are looked up and called through them:
+
+| Tool | Does |
+| --- | --- |
+| `list-graphs` | Lists the graphs the connection reaches, with the id or alias to pass as `graph` |
+| `get-tools` | For one graph: the index of its tools, split into read and write, and its instructions; with `names`, the full description and input schema of those tools; with `query`, the index filtered to matching tools |
+| `call-read-tool` | Runs one of a graph's read tools |
+| `call-write-tool` | Runs one of a graph's write tools |
+
+```bash
+claude mcp add --transport http robosystems-graphs \
+  https://api.robosystems.ai/v1/mcp/graphs \
+  --header "X-API-Key: <your key>"
+```
+
+Every call names its graph. There is no current graph and nothing to switch, and the server checks the key's access to the named graph on each call, as it does on that graph's own URL. A subgraph is a graph: `create-subgraph` on the parent returns an id that works as `graph` on the next call. A graph-scoped key and an OAuth sign-in each carry one graph and are refused here; they connect at the addresses [above](#connecting-from-mcp-clients).
+
+Two query parameters narrow a connection. Both are settings of the connection, not limits on the key:
+
+- `graphs` limits it to named graphs and their subgraphs, as a comma-separated list of graph ids. An entry can carry an alias (`books=kg1a2b…`), which the model can pass as `graph`, and a `:ro` suffix, which withholds that graph's write tools: `?graphs=books=kg1a2b…,sec:ro`
+- `read_only=true` withholds every write tool: `call-write-tool` is not listed and cannot be called
 
 #### The RoboLedger route
 
@@ -550,7 +576,7 @@ Relevant feature flags (`ROBOLEDGER_ENABLED`, `ROBOINVESTOR_ENABLED`, `EXTENSION
 
 ## Self-hosted deployments
 
-A stack you run serves the same MCP routes at `http://localhost:8000/v1/mcp`, `http://localhost:8000/v1/mcp/roboledger` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth routes require `MCP_OAUTH_ENABLED=true`; the per-graph route takes the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development.md).
+A stack you run serves the same MCP routes at `http://localhost:8000/v1/mcp`, `http://localhost:8000/v1/mcp/roboledger`, `http://localhost:8000/v1/mcp/graphs` and `http://localhost:8000/v1/graphs/{graph_id}/mcp`. The OAuth routes require `MCP_OAUTH_ENABLED=true`; the per-graph and every-graph routes take the key from `just demo-user` in `X-API-Key`. See [Local Development](Local-Development.md).
 
 Operators on a stack you run can use an open-weight model in place of the Bedrock models, through any OpenAI-compatible server. Which tiers it backs, which endpoints work, and which models we tested are in [Self-Hosted AI Models](Self-Hosted-AI-Models.md).
 

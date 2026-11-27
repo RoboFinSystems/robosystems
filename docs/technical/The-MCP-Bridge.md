@@ -2,6 +2,8 @@
 
 `@robosystems/mcp` is a small program an MCP client runs locally. With an API key it gives the client one connection to every graph the key covers: your own graphs, their subgraphs and the shared repositories you subscribe to. The model names the graph on each call, so it can work across graphs in one conversation and use a subgraph the moment it is created.
 
+A client with HTTP transport that can send a header does not need the bridge for this: the hosted server serves the same four tools at `https://api.robosystems.ai/v1/mcp/graphs`. See [One connection for every graph](AI-Operators-and-MCP.md#one-connection-for-every-graph). The bridge is for clients that only run local servers.
+
 It is the developer route. To ask an assistant about one graph, connect the hosted server by address and sign in instead; that needs no key, no install and works in claude.ai and ChatGPT. See [Connecting from MCP Clients](AI-Operators-and-MCP.md#connecting-from-mcp-clients).
 
 | | Connect by address | The bridge |

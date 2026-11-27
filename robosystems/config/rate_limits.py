@@ -265,8 +265,9 @@ class RateLimitConfig:
     if path.startswith("/v1/"):
       path = path[4:]
 
-    # Graph-agnostic MCP transports (the OAuth grant names the graph).
-    if path in ("mcp", "mcp/roboledger"):
+    # MCP transports with no graph in the path: the OAuth grant names it, or
+    # (mcp/graphs) each call does.
+    if path in ("mcp", "mcp/roboledger", "mcp/graphs"):
       return EndpointCategory.GRAPH_MCP
 
     # Non-graph scoped endpoints - check these first

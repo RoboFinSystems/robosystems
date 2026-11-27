@@ -37,6 +37,7 @@ from .graphs import (
 )
 from .graphs.content_ops import router as graph_content_ops_router
 from .graphs.mcp import agnostic_router as mcp_agnostic_router
+from .graphs.mcp import graphs_router as mcp_graphs_router
 from .graphs.mcp import remote_router as mcp_remote_router
 from .graphs.mcp import roboledger_router as mcp_roboledger_router
 from .graphs.operations import router as graph_operations_router
@@ -132,6 +133,8 @@ mcp_agnostic_router_v1.include_router(mcp_agnostic_router, prefix="/mcp")
 # RoboLedger graphs only, with a product tool profile (a directory listing
 # freezes one tool list per URL).
 mcp_agnostic_router_v1.include_router(mcp_roboledger_router, prefix="/mcp/roboledger")
+# Every graph an account-wide API key reaches; each call names its graph.
+mcp_agnostic_router_v1.include_router(mcp_graphs_router, prefix="/mcp/graphs")
 
 # No `tags` here: the auth sub-routers tag themselves, and a tag set here
 # would win the grouping (consumers read the first tag: the API reference's
