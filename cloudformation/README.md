@@ -1,6 +1,6 @@
 # CloudFormation Templates
 
-Infrastructure as Code for deploying RoboSystems to AWS. All templates are deployed via GitHub Actions workflows, except `bootstrap-oidc.yaml`, which is deployed locally to enable CI/CD authentication, and `serve.yaml`, which is not part of this deployment at all: it launches the whole platform on one EC2 instance, for self-hosting.
+Infrastructure as Code for deploying RoboSystems to AWS. All templates are deployed via GitHub Actions workflows, except `bootstrap-oidc.yaml`, which is deployed locally to enable CI/CD authentication, `bootstrap-sso.yaml`, which is deployed locally because a workflow able to write permission sets could grant itself admin, and `serve.yaml`, which is not part of this deployment at all: it launches the whole platform on one EC2 instance, for self-hosting.
 
 **This README describes what each template is for and how the stacks fit together. It deliberately does not restate parameter tables, defaults, or instance sizes.** Those live in each template's own `Parameters:` block, in `.github/configs/graph.yml` (graph tiers), and in the GitHub Actions variables the deploy workflows pass in (`just gha-list`). Template defaults are frequently *not* what an environment runs — sizing is overridden per environment by workflow inputs — so a restated default here is worse than no value at all.
 
@@ -9,6 +9,7 @@ Infrastructure as Code for deploying RoboSystems to AWS. All templates are deplo
 | Template | Purpose | Deployed by | Dependencies |
 |----------|---------|-------------|--------------|
 | `bootstrap-oidc.yaml` | GitHub OIDC for CI/CD | `just bootstrap` (local) | None |
+| `bootstrap-sso.yaml` | Daily SSO permission sets | `just bootstrap-sso` (local) | IAM Identity Center |
 | `vpc.yaml` | Network foundation | `deploy-vpc.yml` | None |
 | `cloudtrail.yaml` | Audit logging | `deploy-vpc.yml` (`cloudtrail` job) | None |
 | `security.yaml` | Account-global detective controls | `deploy-vpc.yml` (`security` job) | None |
@@ -132,6 +133,19 @@ Parameters are documented in each template — read the `Parameters:` block for 
 - `{StackName}-GitHubActionsRoleArn`, `-GitHubActionsRoleName`
 - `{StackName}-GitHubActionsFrontendRoleArn`, `-GitHubActionsFrontendRoleName`
 - `{StackName}-AppSuperAdminRoleArn`, `-AppSuperAdminRoleName`
+
+#### `bootstrap-sso.yaml`
+**Purpose**: The IAM Identity Center permission sets used day to day, so `AdministratorAccess` is needed only for bootstrap and infrastructure. `RoboSystemsOperator` is `ReadOnlyAccess` plus the writes the local tools make (bastion tunnels, Dagster webserver scaling, feature-flag and tuning parameters, cost queries) and the postgres and admin secrets, with explicit denies on every other secret and on customer objects. `RoboSystemsAuditor` is `SecurityAudit` + `ViewOnlyAccess`.
+
+**Deploy**: Locally with `just bootstrap-sso` (also offered at the end of `just bootstrap`). It never manages the `AdministratorAccess` set, so no update can lock its operator out.
+
+**Key Resources**:
+- `AWS::SSO::PermissionSet` - Operator and Auditor
+- `AWS::IdentityStore::Group` - `RoboSystemsOperators` and `RoboSystemsAuditors`; membership is managed outside the stack
+- `AWS::SSO::Assignment` - each set to its group in this account
+
+**Exports**:
+- `{StackName}-OperatorPermissionSetArn`, `-AuditorPermissionSetArn`
 
 ---
 

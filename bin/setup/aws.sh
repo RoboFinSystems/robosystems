@@ -19,6 +19,13 @@
 
 set -e
 
+# Writes secrets and parameters, so it runs as the admin profile, not the
+# daily operator profile .envrc exports.
+# shellcheck source=bin/setup/profiles.sh
+source "$(dirname "${BASH_SOURCE[0]}")/profiles.sh"
+AWS_PROFILE="$(resolve_admin_profile)"
+export AWS_PROFILE
+
 echo "=== RoboSystems AWS Setup ==="
 echo ""
 

@@ -7,6 +7,7 @@ Scripts for bootstrapping and configuring RoboSystems deployments. These handle 
 | Script               | Purpose                        | Prerequisites       | Est. Time |
 | -------------------- | ------------------------------ | ------------------- | --------- |
 | `bootstrap.sh`       | Complete first-time setup      | AWS SSO, GitHub CLI | 5-10 min  |
+| `bootstrap-sso.sh`   | Daily SSO permission sets + CLI profiles | AWS SSO (admin) | 2-3 min |
 | `aws.sh`             | Secrets + SSM parameters       | AWS credentials     | 1-2 min   |
 | `gha.sh`             | Configure GitHub variables     | GitHub CLI          | 2-3 min   |
 | `bedrock.sh`         | Local AI development setup     | AWS credentials     | 1 min     |
@@ -115,6 +116,14 @@ The complete bootstrap process for a fresh deployment:
 │    1) Production only (recommended)                                         │
 │    2) Production + Staging                                                  │
 └─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  STEP 9: DAILY PERMISSION SETS (Prompt, Y/n)                                │
+├─────────────────────────────────────────────────────────────────────────────┤
+│  Runs bootstrap-sso.sh: RoboSystemsOperator + RoboSystemsAuditor, then      │
+│  splits the CLI into robosystems-admin and robosystems-sso (daily)          │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -129,7 +138,7 @@ The complete bootstrap process for a fresh deployment:
 
 ```bash
 # Using justfile (recommended)
-just bootstrap                           # Default: robosystems-sso profile, us-east-1
+just bootstrap                           # Default: robosystems-admin profile, us-east-1
 just bootstrap my-fork-sso               # Custom SSO profile
 just bootstrap my-fork-sso eu-west-1     # Custom profile and region
 just bootstrap-oidc                      # Re-apply the deploy roles only (see below)
@@ -141,7 +150,7 @@ just bootstrap-oidc                      # Re-apply the deploy roles only (see b
 **Arguments**:
 | Argument | Default | Description |
 |----------|---------|-------------|
-| `profile` | `robosystems-sso` | AWS SSO profile name |
+| `profile` | `robosystems-admin` (`robosystems-sso` until the profiles are split) | AWS SSO admin profile name |
 | `region` | `us-east-1` | AWS region |
 | `--oidc` | off | Only the OIDC stack and the three identity variables; nothing else is touched |
 | `--with-app-config` | off | On a re-run, also offer the Secrets Manager / GitHub-variables setup |
@@ -183,9 +192,26 @@ procedure.
 **Environment Variables Used**:
 | Variable | Source | Description |
 |----------|--------|-------------|
-| `AWS_PROFILE` | Argument or env | SSO profile to use |
+| `ROBOSYSTEMS_ADMIN_PROFILE` | Env | Admin profile when no argument is given; the ambient `AWS_PROFILE` is not used, since `.envrc` points it at the daily profile |
 | `AWS_REGION` | Argument or env | AWS region |
 | `ECR_LIFECYCLE_POLICY` | Env | Skips the lifecycle-policy prompt: `robust` (the bundled `ecr-lifecycle-policy.json`), `basic`, or `skip`/`none` |
+
+---
+
+### `bootstrap-sso.sh`
+
+**Purpose**: Deploys `cloudformation/bootstrap-sso.yaml` (stack `RoboSystemsSSO`), the IAM Identity Center permission sets people work in day to day, and splits the CLI into two profiles on one SSO session: `robosystems-admin` (AdministratorAccess) and `robosystems-sso` (RoboSystemsOperator, where `.envrc` points). What each set allows is in the template and in the [Bootstrap Guide](/docs/technical/Bootstrap-Guide.md#daily-access-permission-sets).
+
+**Usage**:
+
+```bash
+just bootstrap-sso                        # admin profile resolved by profiles.sh, us-east-1
+just bootstrap-sso my-fork-admin eu-west-1
+```
+
+Creating the stack asks once; updating it shows the change set and asks before applying, like `bootstrap-oidc`. The sets are assigned to the `RoboSystemsOperators` and `RoboSystemsAuditors` groups the stack creates; the script offers to add you to `RoboSystemsOperators`, and anyone else gets access by group membership, with no stack change. Writing `~/.aws/config` and repointing `.envrc` are asked for separately. It runs locally only: a workflow that could write permission sets could grant itself admin. The AdministratorAccess set is left alone on purpose.
+
+`profiles.sh` is the helper the admin-only scripts (`bootstrap.sh`, `aws.sh`, `bedrock.sh`) source to resolve their profile: an argument, then `ROBOSYSTEMS_ADMIN_PROFILE`, then `robosystems-admin`, then `robosystems-sso` while the profiles are not yet split.
 
 ---
 
@@ -532,7 +558,10 @@ just bootstrap my-fork-sso
 # Bootstrap with custom profile AND region
 just bootstrap my-fork-sso eu-west-1
 
-# Individual setup scripts
+# Daily permission sets and CLI profiles
+just bootstrap-sso
+
+# Individual setup scripts (run as the admin profile)
 just setup-aws          # Secrets + SSM parameters
 just setup-gha          # GitHub Actions variables
 just setup-bedrock      # Local Bedrock development
@@ -563,8 +592,9 @@ aws secretsmanager list-secrets  # AWS secrets
 | Issue               | Solution                                      |
 | ------------------- | --------------------------------------------- |
 | "Profile not found" | Run `just bootstrap` to create profile        |
-| "Token expired"     | Run `aws sso login --profile robosystems-sso` |
-| "Access denied"     | Verify SSO permissions in IAM Identity Center |
+| "Token expired"     | Run `aws sso login --profile robosystems-sso` (one login covers both profiles) |
+| "Access denied" on the daily profile | It is read-only outside its listed writes; use `--profile robosystems-admin` |
+| "Access denied" on the admin profile | Verify SSO permissions in IAM Identity Center |
 
 ### GitHub CLI Issues
 
@@ -630,6 +660,7 @@ See the [Bootstrap Guide](https://robosystems.ai/docs/technical/bootstrap-guide)
 
 ## Security Notes
 
+- **Least privilege by default** - Daily work runs on the RoboSystemsOperator permission set; AdministratorAccess is for bootstrap and infrastructure
 - **No long-term AWS credentials for deploy or runtime** - Uses SSO and OIDC
   (`bedrock.sh` mints a scoped IAM key for local AI development only)
 - **Secrets auto-generated** - JWT keys, encryption keys created automatically

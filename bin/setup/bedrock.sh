@@ -16,7 +16,7 @@
 #
 # PREREQUISITES:
 #   - Bootstrap completed first (just bootstrap)
-#   - SSO session active (aws sso login --profile robosystems-sso)
+#   - SSO session active on the admin profile (aws sso login --profile robosystems-admin)
 #
 # NOTE: This is optional. Only needed if you want to test AI/Bedrock features
 # locally. Production uses IAM role credentials via ECS task role.
@@ -37,11 +37,14 @@ NC='\033[0m'
 IAM_USER_NAME="RoboSystemsBedrockDev"
 POLICY_NAME="RoboSystemsBedrockAccess"
 AWS_REGION="${AWS_REGION:-us-east-1}"
-SSO_PROFILE="${AWS_PROFILE:-robosystems-sso}"
 ENV_FILE=".env"
 
 # Script directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# Creates an IAM user, so it runs as the admin profile.
+# shellcheck source=bin/setup/profiles.sh
+source "${SCRIPT_DIR}/profiles.sh"
+SSO_PROFILE="$(resolve_admin_profile)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 print_header() {

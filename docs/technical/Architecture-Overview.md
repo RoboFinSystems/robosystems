@@ -905,6 +905,7 @@ All infrastructure is managed through CloudFormation templates in `/cloudformati
 #### Bootstrap
 
 - **`bootstrap-oidc.yaml`**: GitHub OIDC federation for CI/CD authentication (deployed locally via `just bootstrap`)
+- **`bootstrap-sso.yaml`**: IAM Identity Center permission sets for daily operation, so `AdministratorAccess` is break-glass only (deployed locally via `just bootstrap-sso`)
 
 #### Core Infrastructure
 
