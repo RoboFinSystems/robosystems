@@ -526,6 +526,10 @@ def _envelope_result(parsed) -> dict:
   return result if isinstance(result, dict) else {}
 
 
+class SemanticMemoryDisabled(Exception):
+  """The server runs with SEMANTIC_MEMORY_ENABLED off, which is its default."""
+
+
 def seed_semantic_memories(client: AuthenticatedClient, graph_id: str) -> int:
   """Store free-text memories via the `remember` content operation.
 
@@ -581,6 +585,8 @@ def seed_semantic_memories(client: AuthenticatedClient, graph_id: str) -> int:
       result = _envelope_result(response.parsed)
       mem_id = result.get("id", "?") if isinstance(result, dict) else "?"
       print(f"   ✅ remembered [{mem['memory_type']}] {mem_id}: {mem['text'][:60]}…")
+    elif response.status_code == 503 and b"not enabled" in (response.content or b""):
+      raise SemanticMemoryDisabled
     else:
       print(f"   ❌ remember failed: {response.status_code}")
       if response.content:
@@ -708,8 +714,13 @@ def main():
 
   # --- Modality 2: semantic memory (ranked vector recall) ---
   # Scoped to the parent graph: the API refuses semantic memory on subgraphs.
-  failures = seed_semantic_memories(client, graph_id)
-  failures += recall_semantic_memories(client, graph_id)
+  try:
+    failures = seed_semantic_memories(client, graph_id)
+    failures += recall_semantic_memories(client, graph_id)
+  except SemanticMemoryDisabled:
+    failures = 0
+    print("   ⏭️  Skipped: semantic memory is off on this server.")
+    print("      Set SEMANTIC_MEMORY_ENABLED=true in its .env to run this part.")
 
   if failures:
     print("\n" + "=" * 70)

@@ -109,7 +109,10 @@ if [ "$DRY_RUN" = 1 ]; then
 fi
 
 mkdir -p "$TOOLS" .local/env-backups
-cp "$HERE/upgrade-to.sh" "$HERE/check-release-image.sh" "$HERE/settings-drift.sh" "$HERE/wait-for-version.sh" "$HERE/upgrade.sh" "$TOOLS/"
+# Run from the kept copy itself (a rollback does), there is nothing to copy.
+if [ "$HERE" != "$(cd "$TOOLS" && pwd)" ]; then
+  cp "$HERE/upgrade-to.sh" "$HERE/check-release-image.sh" "$HERE/settings-drift.sh" "$HERE/wait-for-version.sh" "$HERE/upgrade.sh" "$TOOLS/"
+fi
 BACKUP=".local/env-backups/env-$(date +%Y%m%d-%H%M%S)"
 cp .env "$BACKUP"
 ROLLBACK=$(rollback_hint)
