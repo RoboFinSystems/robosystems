@@ -190,14 +190,28 @@
       "label": "AWS STS Identity",
       "type": "shell",
       "command": "direnv",
-      "args": ["exec", ".", "aws", "sts", "get-caller-identity"],
+      "args": ["exec", ".", "aws", "sts", "get-caller-identity", "--profile", "${input:awsIdentityProfile}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Bootstrap",
+      "type": "shell",
+      "command": "just",
+      "args": ["bootstrap", "${input:awsAdminProfile}", "${input:awsRegion}"],
       "problemMatcher": []
     },
     {
       "label": "RoboSystems Bootstrap OIDC",
       "type": "shell",
       "command": "just",
-      "args": ["bootstrap", "${input:awsProfile}", "${input:awsRegion}"],
+      "args": ["bootstrap-oidc", "${input:awsAdminProfile}", "${input:awsRegion}"],
+      "problemMatcher": []
+    },
+    {
+      "label": "RoboSystems Bootstrap SSO",
+      "type": "shell",
+      "command": "just",
+      "args": ["bootstrap-sso", "${input:awsAdminProfile}", "${input:awsRegion}"],
       "problemMatcher": []
     },
     {
@@ -460,6 +474,19 @@
       "type": "promptString",
       "description": "AWS Profile:",
       "default": "robosystems-sso"
+    },
+    {
+      "id": "awsIdentityProfile",
+      "type": "pickString",
+      "description": "AWS profile to check (one SSO login covers both):",
+      "default": "robosystems-sso",
+      "options": ["robosystems-sso", "robosystems-admin"]
+    },
+    {
+      "id": "awsAdminProfile",
+      "type": "promptString",
+      "description": "AWS admin profile (AdministratorAccess):",
+      "default": "robosystems-admin"
     },
     {
       "id": "awsRegion",
