@@ -111,6 +111,12 @@ cannot use. `ROBOLEDGER_ROUTE` in `tools/route_profile.py` is the cut the
 transport applies. No text the route serves may name a tool it withholds;
 `test_subgraph_tool_profile` checks every one.
 
+The `/v1/mcp/graphs` route (`routers/graphs/mcp/catalog.py`) lists none of
+these tools. It serves four of its own (`list-graphs`, `get-tools`,
+`call-read-tool`, `call-write-tool`) that take the graph as an argument and
+hand each call to the same per-graph handler, so a tool behaves there as it
+does on its graph's own URL.
+
 The intended pattern is the index once, the types a question needs, then typed
 queries against them:
 

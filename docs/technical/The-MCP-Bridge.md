@@ -1,19 +1,16 @@
 # The MCP Bridge
 
-`@robosystems/mcp` is a small program an MCP client runs locally. With an API key it gives the client one connection to every graph the key covers: your own graphs, their subgraphs and the shared repositories you subscribe to. The model names the graph on each call, so it can work across graphs in one conversation and use a subgraph the moment it is created.
+`@robosystems/mcp` is a small program an MCP client runs locally. It carries the server's MCP endpoints to a client that only runs local stdio servers, or that cannot send a request header. With an API key and nothing else set, it connects [one connection for every graph](AI-Operators-and-MCP.md#one-connection-for-every-graph): your own graphs, their subgraphs and the shared repositories you subscribe to. The model names the graph on each call, so it can work across graphs in one conversation and use a subgraph the moment it is created.
 
-A client with HTTP transport that can send a header does not need the bridge for this: the hosted server serves the same four tools at `https://api.robosystems.ai/v1/mcp/graphs`. See [One connection for every graph](AI-Operators-and-MCP.md#one-connection-for-every-graph). The bridge is for clients that only run local servers.
-
-It is the developer route. To ask an assistant about one graph, connect the hosted server by address and sign in instead; that needs no key, no install and works in claude.ai and ChatGPT. See [Connecting from MCP Clients](AI-Operators-and-MCP.md#connecting-from-mcp-clients).
+**A client with HTTP transport does not need it.** Connect `https://api.robosystems.ai/v1/mcp/graphs` with the key in the `X-API-Key` header and you have the same connection with nothing to install. To ask an assistant about one graph, connect the hosted server by address and sign in instead; that needs no key and works in claude.ai and ChatGPT. See [Connecting from MCP Clients](AI-Operators-and-MCP.md#connecting-from-mcp-clients).
 
 | | Connect by address | The bridge |
 | --- | --- | --- |
-| Runs | On our servers | On your machine, started by the client |
-| Signs in with | OAuth in the browser | An API key in the client's configuration |
-| Reaches | One graph per connection | Every graph the key covers |
-| A new subgraph | A new connection | Usable on the next call |
+| Runs | Nothing on your machine | On your machine, started by the client |
+| Signs in with | OAuth in the browser, or an API key in a header | An API key in the client's configuration |
+| Reaches | One graph, or every graph at `/v1/mcp/graphs` | The same: every graph the key covers, or one |
 | Works in | Any MCP client with HTTP transport, including claude.ai and ChatGPT | Clients that run local servers: Claude Code, Claude Desktop, Cursor, VS Code |
-| Tools the model sees | The graph's own tools | Four fixed tools that look up and call any graph's tools |
+| Needs | Nothing | Node.js 22 or later |
 
 ---
 
@@ -49,7 +46,7 @@ Keep `@latest` in the arguments: a global `npm install -g @robosystems/mcp` can 
 
 ## How a Session Works
 
-The bridge serves four tools, the same on every connection:
+The connection has four tools, the same every time. They are the server's; the bridge passes them through:
 
 | Tool | Does |
 | --- | --- |
@@ -58,7 +55,7 @@ The bridge serves four tools, the same on every connection:
 | `call-read-tool` | Runs one of a graph's read tools |
 | `call-write-tool` | Runs one of a graph's write tools |
 
-A graph's tools are looked up, not listed. A ledger graph, the `sec` repository and a subgraph each return their own tools and instructions from `get-tools`, so the bridge's own tool list stays four small definitions whatever the graphs behind it serve. The tools themselves are the ones in the [tool catalog](AI-Operators-and-MCP.md#tool-catalog).
+A graph's tools are looked up, not listed. A ledger graph, the `sec` repository and a subgraph each return their own tools and instructions from `get-tools`, so the connection's own tool list stays four small definitions whatever the graphs behind it serve. The tools themselves are the ones in the [tool catalog](AI-Operators-and-MCP.md#tool-catalog).
 
 A typical sequence:
 
@@ -67,9 +64,9 @@ A typical sequence:
 3. `get-tools` with that graph and `names`, to read a tool's definition before calling it.
 4. `call-read-tool` or `call-write-tool` with the graph, the tool's name and its arguments.
 
-Every call names its graph. There is no current graph and nothing to switch, so conversations that share one bridge process cannot redirect each other. Each call is forwarded to that graph's own endpoint (`/v1/graphs/{graph_id}/mcp`) with your key, where access, write policy and audit apply exactly as they do for a direct connection.
+Every call names its graph. There is no current graph and nothing to switch, so conversations that share one bridge process cannot redirect each other. The server checks your key's access to the named graph on each call, and write policy and audit apply exactly as they do on that graph's own address.
 
-Reads and writes stay separate because clients treat them differently. The split follows the read-only hint the server publishes for each tool, so a client can approve reads without prompting and still show each write by name and arguments.
+Reads and writes stay separate because clients treat them differently. The split follows the read-only hint each tool carries, so a client can approve reads without prompting and still show each write by name and arguments.
 
 ---
 
@@ -84,7 +81,7 @@ call-write-tool  graph: kg1a2b…_scratch  name: write-graph-cypher arguments: {
 call-read-tool   graph: kg1a2b…_scratch  name: read-graph-cypher  arguments: { … }
 ```
 
-The result of `create-subgraph` also carries a `connector_url` and advice to add a connector for it. That advice is for a connection to a single graph; through the bridge, pass the id as `graph`. The parent's `list-subgraphs` lists them and `delete-subgraph` removes one. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md) for how subgraphs relate to their parent.
+The result of `create-subgraph` also carries a `connector_url` and advice to add a connector for it. That advice is for a connection to a single graph; here, pass the id as `graph`. The parent's `list-subgraphs` lists them and `delete-subgraph` removes one. See [Graphs & Multi-Tenancy](Graphs-and-Multi-Tenancy.md) for how subgraphs relate to their parent.
 
 ---
 
@@ -100,8 +97,8 @@ By default the connection reaches every graph the key covers. `ROBOSYSTEMS_GRAPH
 ```
 
 - An entry is a graph id or `alias=id`. The alias is what the model passes as `graph`, and what an approval prompt shows
-- Any graph outside the list is refused before a request is made
-- A key scoped to one graph cannot list the account, so name its graph here
+- Any graph outside the list is refused
+- Reaching every graph takes a key that covers all your graphs. A key scoped to one graph connects that graph with `ROBOSYSTEMS_GRAPH_ID` ([below](#one-graph))
 
 ---
 
@@ -120,20 +117,20 @@ A read-only graph's write tools are left out of `get-tools`. These are settings 
 
 | Variable | Purpose | Default |
 | --- | --- | --- |
-| `ROBOSYSTEMS_API_KEY` | API key, sent as `X-API-Key`; account-wide or scoped to one graph | none |
+| `ROBOSYSTEMS_API_KEY` | API key, sent as `X-API-Key`. Reaching every graph takes an account-wide key | none |
 | `ROBOSYSTEMS_GRAPH_IDS` | The graphs to reach, as ids or `alias=id` pairs separated by commas; `:ro` marks one read-only | every graph the key reaches |
 | `ROBOSYSTEMS_READ_ONLY` | `true` withholds every write tool | `false` |
 | `ROBOSYSTEMS_API_URL` | Base URL of the API, for a stack you run | `https://api.robosystems.ai` |
-| `ROBOSYSTEMS_GRAPH_ID` | Selects proxy mode for this one graph (below) | none |
-| `ROBOSYSTEMS_MCP_URL` | Selects proxy mode for a full endpoint URL | none |
+| `ROBOSYSTEMS_GRAPH_ID` | Connects this one graph instead (below) | none |
+| `ROBOSYSTEMS_MCP_URL` | Connects a full endpoint URL instead | none |
 
-For a stack you run, set `ROBOSYSTEMS_API_URL` to its address: `http://localhost:8000` in [Local Development](Local-Development.md), or your server's name in [Self-Hosting on a Server](Self-Hosting-on-a-Server.md). The read and write split needs a server that publishes the per-tool hints; against one that does not, every tool runs through `call-write-tool`.
+For a stack you run, set `ROBOSYSTEMS_API_URL` to its address: `http://localhost:8000` in [Local Development](Local-Development.md), or your server's name in [Self-Hosting on a Server](Self-Hosting-on-a-Server.md). The every-graph connection needs a server that serves `/v1/mcp/graphs`; against an older one, upgrade the server or connect one graph with `ROBOSYSTEMS_GRAPH_ID`.
 
 ---
 
-## Proxy Mode
+## One Graph
 
-Setting `ROBOSYSTEMS_GRAPH_ID` (or `ROBOSYSTEMS_MCP_URL`) turns the bridge into a transparent pipe to one graph's endpoint. Every message is forwarded unchanged with the key attached, so the client sees that graph's own tools and instructions, exactly as it would connecting the address directly.
+Setting `ROBOSYSTEMS_GRAPH_ID` (or `ROBOSYSTEMS_MCP_URL`) points the bridge at one graph's endpoint. Every message is forwarded unchanged with the key attached, so the client sees that graph's own tools and instructions, exactly as it would connecting the address directly. `ROBOSYSTEMS_GRAPH_IDS` and `ROBOSYSTEMS_READ_ONLY` do not apply.
 
 ```json
 "env": {
@@ -150,9 +147,9 @@ This is for a client that can only run local servers and needs one graph's tools
 
 - **Local clients only.** claude.ai, ChatGPT and other hosted chat clients cannot run it; they connect by address
 - **API key only.** The bridge does not use the OAuth routes
-- **One more step per tool.** The model reads a tool's definition before its first call, where a direct connection lists every definition up front
-- **Client permissions are per bridge tool.** A client can allow all reads or approve each write, but cannot allow one named platform tool
-- **Protocol.** The bridge answers MCP revision `2025-06-18`, the revision the server implements
+- **One more step per tool.** On the every-graph connection the model reads a tool's definition before its first call, where a connection to one graph lists every definition up front
+- **Client permissions are per connection tool.** On the every-graph connection a client can allow all reads or approve each write, but cannot allow one named platform tool
+- **Protocol.** MCP revision `2025-06-18`, the revision the server implements
 
 ---
 

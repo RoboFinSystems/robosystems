@@ -155,7 +155,7 @@ Model Context Protocol server for AI integration:
 - **Streaming Support**: SSE for memory-efficient large result processing
 - **Query Validation**: Complexity scoring and timeout enforcement
 
-**Client Integration**: MCP clients (Claude, ChatGPT, Cursor or any MCP client) connect to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header or OAuth, or sign in through the graph-agnostic OAuth routes (`/v1/mcp`, and `/v1/mcp/roboledger` for RoboLedger graphs) — see [AI Operators and MCP](AI-Operators-and-MCP.md). The [MCP bridge](The-MCP-Bridge.md) (`@robosystems/mcp` npm package) runs beside a local client and reaches every graph an API key covers through one connection.
+**Client Integration**: MCP clients (Claude, ChatGPT, Cursor or any MCP client) connect to a graph's MCP Streamable HTTP endpoint (`POST /v1/graphs/{graph_id}/mcp`) with an `X-API-Key` header or OAuth, or sign in through the graph-agnostic OAuth routes (`/v1/mcp`, and `/v1/mcp/roboledger` for RoboLedger graphs) — see [AI Operators and MCP](AI-Operators-and-MCP.md). `/v1/mcp/graphs` reaches every graph an account-wide API key covers through one connection, naming the graph on each call. The [MCP bridge](The-MCP-Bridge.md) (`@robosystems/mcp` npm package) carries any of these endpoints to a client that only runs local stdio servers.
 
 **See**: [MCP Middleware Documentation](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/middleware/mcp/README.md) in codebase
 

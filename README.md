@@ -137,7 +137,7 @@ The whole corpus is published monthly as one LadybugDB file on Hugging Face: [ro
 
 ### MCP
 
-Every graph is an MCP server. The URL picks the graph: `sec` for the public repository, your graph id for your own.
+Every graph is an MCP server, and one address reaches all of them.
 
 **OAuth.** `https://api.robosystems.ai/v1/mcp` takes any OAuth-capable client (claude.ai, Claude Code, ChatGPT, VS Code, Cursor): sign in, choose the graph, and the client holds a revocable token for it. `https://api.robosystems.ai/v1/mcp/roboledger` is the same for RoboLedger graphs, with the accounting tools only.
 
@@ -145,15 +145,17 @@ Every graph is an MCP server. The URL picks the graph: `sec` for the public repo
 claude mcp add --transport http robosystems https://api.robosystems.ai/v1/mcp
 ```
 
-**API key**, in the `X-API-Key` header and never in the URL:
+**API key**, in the `X-API-Key` header and never in the URL. `https://api.robosystems.ai/v1/mcp/graphs` is one connection for every graph the key reaches: four tools list your graphs, look up any graph's tools and call them, naming the graph each time.
 
 ```bash
-claude mcp add --transport http robosystems-sec \
-  https://api.robosystems.ai/v1/graphs/sec/mcp \
+claude mcp add --transport http robosystems \
+  https://api.robosystems.ai/v1/mcp/graphs \
   --header "X-API-Key: <your key>"
 ```
 
-The app's MCP page (`/connect`) has the snippet for each client, filled in for the selected graph. More: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · the [MCP bridge](https://github.com/RoboFinSystems/robosystems-mcp-bridge) for one local connection to every graph an API key covers.
+For one graph, with its tools listed directly, use the graph's own URL: `https://api.robosystems.ai/v1/graphs/{graph_id}/mcp`.
+
+The app's MCP page (`/connect`) has the snippet for each client, filled in for the selected graph. More: [AI Operators and MCP](https://robosystems.ai/docs/technical/ai-operators-and-mcp) · the [MCP bridge](https://github.com/RoboFinSystems/robosystems-mcp-bridge) for clients that only run local stdio servers.
 
 ### Client libraries
 

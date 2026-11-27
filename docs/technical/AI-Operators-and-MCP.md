@@ -591,7 +591,7 @@ Operators on a stack you run can use an open-weight model in place of the Bedroc
 - **[GraphQL Reads](GraphQL-Reads.md)** - The typed operational read surface in depth
 - **[Search and AI Retrieval](Search-and-AI-Retrieval.md)** - The document index and hybrid search in depth
 - **[Self-Hosted AI Models](Self-Hosted-AI-Models.md)** - Running the operators on a model you choose
-- **[The MCP Bridge](The-MCP-Bridge.md)** - One local connection for every graph an API key covers
+- **[The MCP Bridge](The-MCP-Bridge.md)** - The MCP endpoints for a client that only runs local stdio servers
 
 **Codebase Documentation:**
 - **[GraphQL Extensions](https://github.com/RoboFinSystems/robosystems/blob/main/robosystems/graphql/README.md)** - Strawberry GraphQL surface, resolver patterns
