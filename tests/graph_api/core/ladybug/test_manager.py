@@ -227,7 +227,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
     assert not wal_path.exists()
 
   def test_create_database_sec_checkpoint_threshold(self):
-    """SEC database should use 128MB checkpoint threshold."""
+    """SEC keeps its 128MB checkpoint threshold when its pool is large enough."""
     manager = _make_manager(self.temp_dir)
     request = DatabaseCreateRequest(graph_id="sec", schema_type="shared")
 
@@ -243,7 +243,7 @@ class TestLadybugDatabaseManagerCreateDatabase:
         patch("robosystems.graph_api.core.ladybug.manager.env") as mock_env,
         patch(
           "robosystems.graph_api.core.ladybug.config.get_database_memory_config",
-          return_value=256,
+          return_value=8192,
         ),
       ):
         mock_env.is_single_node.return_value = False
