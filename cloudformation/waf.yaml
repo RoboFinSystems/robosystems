@@ -372,19 +372,42 @@ Resources:
               ManagedRuleGroupStatement:
                 VendorName: AWS
                 Name: AWSManagedRulesCommonRuleSet
-                ExcludedRules: # Exclude rules that cause false positives with browser traffic
-                  - Name: NoUserAgent_HEADER # Browsers always send User-Agent, but some tools don't
-                  - Name: UserAgent_BadBots_HEADER # Can block legitimate browser user agents
-                  - Name: SizeRestrictions_BODY # Already handled by our custom rule
-                  - Name: SizeRestrictions_QUERYSTRING # Can block legitimate queries
-                  - Name: GenericRFI_BODY # Can cause false positives with JSON payloads
-                  - Name: GenericRFI_QUERYARGUMENTS # Can block legitimate query parameters
-                  - Name: GenericRFI_URIPATH # Can block legitimate API paths
-                  - Name: RestrictedExtensions_URIPATH # Can block legitimate API endpoints
-                  - Name: RestrictedExtensions_QUERYARGUMENTS # Can block legitimate query params
-                  - Name: EC2MetaDataSSRF_BODY # Can block legitimate requests with URLs
-                  - Name: EC2MetaDataSSRF_QUERYARGUMENTS # Can block legitimate URL parameters
+                # Rules counted instead of blocked. (ExcludedRules cannot be combined
+                # with RuleActionOverrides, so every exception is written this way.)
                 RuleActionOverrides:
+                  - Name: NoUserAgent_HEADER # Browsers always send User-Agent, but some tools don't
+                    ActionToUse:
+                      Count: {}
+                  - Name: UserAgent_BadBots_HEADER # Can block legitimate browser user agents
+                    ActionToUse:
+                      Count: {}
+                  - Name: SizeRestrictions_BODY # Already handled by our custom rule
+                    ActionToUse:
+                      Count: {}
+                  - Name: SizeRestrictions_QUERYSTRING # Can block legitimate queries
+                    ActionToUse:
+                      Count: {}
+                  - Name: GenericRFI_BODY # Can cause false positives with JSON payloads
+                    ActionToUse:
+                      Count: {}
+                  - Name: GenericRFI_QUERYARGUMENTS # Can block legitimate query parameters
+                    ActionToUse:
+                      Count: {}
+                  - Name: GenericRFI_URIPATH # Can block legitimate API paths
+                    ActionToUse:
+                      Count: {}
+                  - Name: RestrictedExtensions_URIPATH # Can block legitimate API endpoints
+                    ActionToUse:
+                      Count: {}
+                  - Name: RestrictedExtensions_QUERYARGUMENTS # Can block legitimate query params
+                    ActionToUse:
+                      Count: {}
+                  - Name: EC2MetaDataSSRF_BODY # Can block legitimate requests with URLs
+                    ActionToUse:
+                      Count: {}
+                  - Name: EC2MetaDataSSRF_QUERYARGUMENTS # Can block legitimate URL parameters
+                    ActionToUse:
+                      Count: {}
                   # Counted here and blocked by rule 6b, which leaves the MCP
                   # endpoints out.
                   - Name: GenericLFI_BODY
