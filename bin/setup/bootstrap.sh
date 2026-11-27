@@ -18,6 +18,7 @@
 #   4. Sets the same identity variables on the frontend app repos, which own
 #      no AWS access of their own — the repos come from the stack parameters
 #   5. First run only: ECR repository, SES identity, application secrets
+#   6. Offers the daily permission sets (bin/setup/bootstrap-sso.sh)
 #
 # MODES:
 #   full (default)  Everything above. On a re-run the application-config
@@ -37,7 +38,8 @@
 #   bin/setup/bootstrap.sh [--oidc] [--with-app-config] [profile] [region]
 #
 # ARGUMENTS:
-#   profile: AWS SSO profile name (default: robosystems-sso)
+#   profile: AWS SSO admin profile name (default: robosystems-admin, or
+#            robosystems-sso before `just bootstrap-sso` has split the profiles)
 #   region:  AWS region (default: us-east-1)
 #
 # EXAMPLES:
@@ -65,7 +67,8 @@ usage() {
     echo "                     identity variables (AWS_ROLE_ARN, AWS_ACCOUNT_ID, AWS_REGION)."
     echo "  --with-app-config  On a re-run, also offer the Secrets Manager / GitHub"
     echo "                     variables setup (skipped by default after the first run)."
-    echo "  profile            AWS SSO profile name (default: robosystems-sso)"
+    echo "  profile            AWS SSO admin profile name (default: robosystems-admin;"
+    echo "                     robosystems-sso until just bootstrap-sso splits them)"
     echo "  region             AWS region (default: us-east-1)"
 }
 
@@ -75,6 +78,7 @@ BOOTSTRAP_MODE="full"
 WITH_APP_CONFIG=false
 _pos_profile=""
 _pos_region=""
+_pos_count=0
 for arg in "$@"; do
     case "$arg" in
         --oidc|--oidc-only) BOOTSTRAP_MODE="oidc" ;;
@@ -82,17 +86,22 @@ for arg in "$@"; do
         -h|--help)          usage; exit 0 ;;
         --*)                echo "Unknown option: $arg" >&2; usage >&2; exit 1 ;;
         *)
-            if [ -z "$_pos_profile" ]; then
-                _pos_profile="$arg"
-            elif [ -z "$_pos_region" ]; then
-                _pos_region="$arg"
-            else
-                echo "Unexpected argument: $arg" >&2; usage >&2; exit 1
-            fi
+            # Counted, not tested for emptiness: an empty profile argument
+            # (just bootstrap's default) still holds the first slot.
+            _pos_count=$((_pos_count + 1))
+            case "$_pos_count" in
+                1) _pos_profile="$arg" ;;
+                2) _pos_region="$arg" ;;
+                *) echo "Unexpected argument: $arg" >&2; usage >&2; exit 1 ;;
+            esac
             ;;
     esac
 done
-SSO_PROFILE="${_pos_profile:-${AWS_PROFILE:-robosystems-sso}}"
+# The admin profile is resolved, never read from AWS_PROFILE: .envrc points
+# that at the daily operator profile, which cannot deploy stacks.
+# shellcheck source=bin/setup/profiles.sh
+source "$(dirname "${BASH_SOURCE[0]}")/profiles.sh"
+SSO_PROFILE="$(resolve_admin_profile "$_pos_profile")"
 AWS_REGION="${_pos_region:-${AWS_REGION:-us-east-1}}"
 OIDC_STACK_NAME="RoboSystemsGitHubOIDC"
 
@@ -104,6 +113,8 @@ OIDC_STACK_CREATED=false
 # This ensures bootstrap works even if .envrc isn't activated yet
 export AWS_PROFILE="$SSO_PROFILE"
 export AWS_REGION="$AWS_REGION"
+# The child setup scripts (aws.sh, bedrock.sh) resolve the same admin profile.
+export ROBOSYSTEMS_ADMIN_PROFILE="$SSO_PROFILE"
 
 # Track if we need to remind user to activate .envrc
 ENVRC_NEEDS_ACTIVATION=false
@@ -144,7 +155,13 @@ setup_direnv() {
     print_header "Setting up direnv"
 
     local target_file=".envrc"
+    # .envrc names the daily profile once bootstrap-sso has created it; before
+    # that, the only profile there is.
     local expected_profile="$SSO_PROFILE"
+    if [ "$ROBOSYSTEMS_OPERATOR_PROFILE" != "$SSO_PROFILE" ] \
+        && aws configure list-profiles 2>/dev/null | grep -qx "$ROBOSYSTEMS_OPERATOR_PROFILE"; then
+        expected_profile="$ROBOSYSTEMS_OPERATOR_PROFILE"
+    fi
     local expected_region="$AWS_REGION"
 
     print_info "Using profile: ${expected_profile}"
@@ -1416,6 +1433,25 @@ show_summary() {
 }
 
 # =============================================================================
+# PERMISSION SETS
+# =============================================================================
+
+offer_permission_sets() {
+    print_header "Daily Permission Sets"
+    echo "AdministratorAccess is for bootstrap and infrastructure. The day-to-day"
+    echo "profile (${ROBOSYSTEMS_OPERATOR_PROFILE}) gets a RoboSystemsOperator permission set:"
+    echo "read-only, plus tunnels, flag flips and the operational secrets."
+    echo ""
+    read -p "Install or update the permission sets now? (Y/n): " -n 1 -r
+    echo ""
+    if [[ $REPLY =~ ^[Nn]$ ]]; then
+        print_info "Skipped. Run later with: just bootstrap-sso"
+        return 0
+    fi
+    "$(dirname "${BASH_SOURCE[0]}")/bootstrap-sso.sh" "$SSO_PROFILE" "$AWS_REGION"
+}
+
+# =============================================================================
 # MAIN
 # =============================================================================
 
@@ -1520,6 +1556,9 @@ main() {
 
     # Setup AWS secrets and GitHub variables (with environment choice)
     setup_secrets_and_variables
+
+    # Daily permission sets, so this admin profile is needed only for bootstrap
+    offer_permission_sets
 
     # Summary
     show_summary

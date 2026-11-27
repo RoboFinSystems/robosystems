@@ -9,6 +9,7 @@ Bootstrap a fork of RoboSystems into your own AWS account: GitHub OIDC roles, se
 - [Fresh AWS Account Setup](#fresh-aws-account-setup)
 - [Bootstrap](#bootstrap)
 - [SSM Parameters & Secrets Manager](#ssm-parameters--secrets-manager)
+- [Daily Access: Permission Sets](#daily-access-permission-sets)
 - [Deploy](#deploy)
 - [Turn On What You Need](#turn-on-what-you-need)
 - [CI/CD and Releases](#cicd-and-releases)
@@ -76,13 +77,13 @@ Skip this section if your AWS account already has IAM Identity Center configured
 ## Bootstrap
 
 ```bash
-# 1. Configure AWS CLI to use SSO
-aws configure sso --profile robosystems-sso
+# 1. Configure AWS CLI to use SSO, on the AdministratorAccess permission set
+aws configure sso --profile robosystems-admin
 
 # 2. Run the bootstrap
-just bootstrap                              # Default profile/region
-just bootstrap robosystems-sso              # Custom profile
-just bootstrap robosystems-sso eu-west-1    # Custom profile AND region
+just bootstrap                                # Default profile/region
+just bootstrap robosystems-admin              # Custom profile
+just bootstrap robosystems-admin eu-west-1    # Custom profile AND region
 ```
 
 Bootstrap handles everything:
@@ -92,6 +93,7 @@ Bootstrap handles everything:
 4. Creates ECR repository for Docker images
 5. Creates `.envrc` for automatic profile/region selection
 6. Prompts to run `setup-aws` (application secrets) and `setup-gha` (deployment variables)
+7. Offers the daily permission sets (see [Daily Access: Permission Sets](#daily-access-permission-sets))
 
 **Re-running is safe.** The OIDC stack is applied through a change set you review before anything changes, and a stack that already matches the template is left alone. Step 6 runs on the first bootstrap only, because `setup-gha` re-asserts every repository variable and would reset a live account's sizing and toggles; to include it in a re-run, pass the flag to the script directly: `bin/setup/bootstrap.sh --with-app-config`. After editing `cloudformation/bootstrap-oidc.yaml`, `just bootstrap-oidc` re-applies the roles and identity variables and touches nothing else.
 
@@ -292,6 +294,28 @@ just ssm-set prod tuning/cache/BALANCE_TTL 600
 **Override priority:** Environment Variable > SSM Parameter > Default Value
 
 **Feature flags are read once, at process start.** After `just ssm-set` on a `features/` parameter, restart the services that read it — the **Service Refresh** workflow (`service-refresh.yml`) restarts the API, Dagster and worker services without a deploy, and any deploy restarts them too. Tuning parameters are different: they can be adjusted at runtime without a restart, and changes take effect within the application's cache TTL (typically 5 minutes).
+
+## Daily Access: Permission Sets
+
+`AdministratorAccess` is for bootstrap and infrastructure. Everything else runs on a permission set made for it, deployed by `just bootstrap-sso` (`cloudformation/bootstrap-sso.yaml`, stack `RoboSystemsSSO`). Bootstrap offers it as its last step; run it on its own to install it later or to apply a template change. A new stack asks once before it is created; an existing one shows the change set and asks before applying.
+
+| Permission set | Contents | Session |
+|---|---|---|
+| `RoboSystemsOperator` | `ReadOnlyAccess`, plus bastion start/stop and port forwarding through it, scaling the Dagster webserver, reading the `robosystems/<env>/postgres` and `robosystems/<env>/admin` secrets, writing `/robosystems/<env>/features/*` and `tuning/*` parameters, and Athena/AMP queries for the cost reviews. Explicitly denied every other secret and the objects in the user-data and audit buckets. | 8 hours |
+| `RoboSystemsAuditor` | `SecurityAudit` + `ViewOnlyAccess`: configuration and inventory, no object contents, table items, log events or secrets | 4 hours |
+
+The CLI ends up with two profiles on one SSO session, and the script offers to write both:
+
+| Profile | Permission set | Used for |
+|---|---|---|
+| `robosystems-sso` | `RoboSystemsOperator` | Everything day to day; `.envrc` points here, and so do `just tunnel`, `just pg-mcp`, `just bastion-*` and `just admin` |
+| `robosystems-admin` | `AdministratorAccess` | `just bootstrap*`, `just setup-aws`, `just setup-bedrock`, `just serve`, migrations through the bastion, shells on instances, and any change to infrastructure |
+
+The admin-only recipes resolve `robosystems-admin` themselves (`bin/setup/profiles.sh`), so they work with `.envrc` exporting the daily profile. Before the profiles are split, the one profile there is serves as the admin profile.
+
+The stack is deployed from your machine, never by a workflow: a deploy role able to write permission sets could grant itself `AdministratorAccess`. It does not manage the `AdministratorAccess` set itself either, so no update can lock you out. Shorten that set's session to one hour in the console (IAM Identity Center → Permission sets → AdministratorAccess → Edit) so a forgotten admin login expires quickly.
+
+The Operator set goes to the user running the script on the first run; set `OPERATOR_USER=<user name>` or `AUDITOR_USER=<user name>` (or `none`) to change an assignment on a later run.
 
 ## Deploy
 
@@ -516,8 +540,11 @@ Ensure your SSO user has permission sets assigned to accounts.
 
 ### SSO: "Profile not found"
 ```bash
-aws configure sso --profile robosystems-sso
+aws configure sso --profile robosystems-admin   # then: just bootstrap-sso
 ```
+
+### SSO: "AccessDenied" on the daily profile
+The operator profile is read-only outside its listed writes. Run the command with `--profile robosystems-admin`, or `AWS_PROFILE=robosystems-admin <command>`.
 
 ### AWS CLI: "You must specify a region"
 ```bash
@@ -541,6 +568,7 @@ echo 'export AWS_REGION=us-east-1' >> .envrc && direnv allow
 just bootstrap                    # Default profile/region
 just bootstrap my-sso eu-west-1   # Custom profile AND region
 just bootstrap-oidc               # Re-apply the OIDC roles + identity variables only
+just bootstrap-sso                # Install/update the daily permission sets + split the CLI profiles
 bin/setup/bootstrap.sh --with-app-config   # Re-run, including secrets + GitHub variables
 
 # Release
@@ -585,6 +613,7 @@ aws sts get-caller-identity
 | Template | Deployed By | Purpose |
 |----------|-------------|---------|
 | `bootstrap-oidc.yaml` | `just bootstrap` (local) | GitHub OIDC federation |
+| `bootstrap-sso.yaml` | `just bootstrap-sso` (local) | Daily IAM Identity Center permission sets |
 | `vpc.yaml` | GitHub Actions | VPC and networking |
 | `postgres.yaml` | GitHub Actions | RDS PostgreSQL |
 | `valkey.yaml` | GitHub Actions | ElastiCache Redis |

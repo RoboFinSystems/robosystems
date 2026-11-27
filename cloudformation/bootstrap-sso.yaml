@@ -1,0 +1,263 @@
+Description: RoboSystems Bootstrap - IAM Identity Center permission sets for day-to-day operation
+
+# The AWS-managed AdministratorAccess permission set is deliberately NOT managed
+# here: it is the break-glass path, and a stack that owned it could lock its own
+# operator out with one bad update. This stack adds the sets people work in day
+# to day, so the admin profile is needed only for bootstrap and infrastructure.
+#
+# Deployed locally by `just bootstrap-sso` (bin/setup/bootstrap-sso.sh), never
+# by a workflow: a deploy role able to write permission sets could grant itself
+# AdministratorAccess.
+
+Parameters:
+  InstanceArn:
+    Type: String
+    Description: ARN of the IAM Identity Center instance (aws sso-admin list-instances)
+    AllowedPattern: ^arn:aws[a-z-]*:sso:::instance/(sso)?ins-[a-zA-Z0-9-.]{16}$
+
+  ServiceTag:
+    Type: String
+    Default: RoboSystems
+    Description: Prefix for the permission set names and tags
+    AllowedPattern: ^[A-Za-z0-9]+$
+
+  OperatorPrincipalId:
+    Type: String
+    Default: ""
+    Description: Identity Center user or group ID given the Operator set in this account (empty = no assignment)
+
+  OperatorPrincipalType:
+    Type: String
+    Default: USER
+    AllowedValues: [USER, GROUP]
+
+  AuditorPrincipalId:
+    Type: String
+    Default: ""
+    Description: Identity Center user or group ID given the Auditor set in this account (empty = no assignment)
+
+  AuditorPrincipalType:
+    Type: String
+    Default: USER
+    AllowedValues: [USER, GROUP]
+
+  OperatorSessionDuration:
+    Type: String
+    Default: PT8H
+    AllowedPattern: ^PT([1-9]|1[0-2])H$
+
+  AuditorSessionDuration:
+    Type: String
+    Default: PT4H
+    AllowedPattern: ^PT([1-9]|1[0-2])H$
+
+  AthenaResultsLocation:
+    Type: String
+    Default: ""
+    Description: Bucket and prefix the Athena workgroup writes results to, e.g. my-cur-bucket/results/ (empty = no Athena queries)
+    AllowedPattern: ^$|^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9](/.*)?$
+
+  AthenaWorkgroup:
+    Type: String
+    Default: primary
+    AllowedPattern: ^[a-zA-Z0-9._-]{1,128}$
+
+Conditions:
+  AssignOperator: !Not [!Equals [!Ref OperatorPrincipalId, ""]]
+  AssignAuditor: !Not [!Equals [!Ref AuditorPrincipalId, ""]]
+  AllowAthena: !Not [!Equals [!Ref AthenaResultsLocation, ""]]
+
+Resources:
+  # ===========================================================================
+  # OPERATOR - the daily set (the robosystems-sso profile)
+  # ===========================================================================
+  # ReadOnlyAccess, plus the few writes the local tools make, scoped to the
+  # resources they make them on:
+  #   just tunnel / bastion-*   bastion start/stop + port forwarding through it
+  #   just tunnel <env> dagster scales the Dagster webserver 0 -> 1 and back
+  #   just pg-mcp               reads robosystems/<env>/postgres
+  #   just admin <env>          reads robosystems/<env>/admin
+  #   just ssm-set              writes /robosystems/<env>/{features,tuning}/*
+  #   cost / usage reviews      Athena over the CUR, PromQL against AMP
+  # Everything else (CloudFormation, IAM, secrets writes, shells on instances,
+  # migrations through the bastion) needs the admin profile.
+  OperatorPermissionSet:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: !Sub ${ServiceTag}Operator
+      Description: Day-to-day operation - read-only plus tunnels, flag flips and operational secrets
+      SessionDuration: !Ref OperatorSessionDuration
+      ManagedPolicies:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/ReadOnlyAccess
+      InlinePolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TunnelThroughBastion
+            Effect: Allow
+            Action: ssm:StartSession
+            Resource: !Sub arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
+            Condition:
+              StringLike:
+                ssm:resourceTag/Name: robosystems-bastion-host-*
+
+          - Sid: PortForwardingDocumentOnly
+            Effect: Allow
+            Action: ssm:StartSession
+            Resource: !Sub arn:${AWS::Partition}:ssm:*::document/AWS-StartPortForwardingSessionToRemoteHost
+
+          - Sid: OwnSessions
+            Effect: Allow
+            Action:
+              - ssm:TerminateSession
+              - ssm:ResumeSession
+            Resource: !Sub arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:session/${!aws:userid}-*
+
+          - Sid: BastionPower
+            Effect: Allow
+            Action:
+              - ec2:StartInstances
+              - ec2:StopInstances
+            Resource: !Sub arn:${AWS::Partition}:ec2:*:${AWS::AccountId}:instance/*
+            Condition:
+              StringLike:
+                aws:ResourceTag/Name: robosystems-bastion-host-*
+
+          - Sid: ScaleDagsterWebserver
+            Effect: Allow
+            Action: ecs:UpdateService
+            Resource: !Sub arn:${AWS::Partition}:ecs:*:${AWS::AccountId}:service/robosystems-dagster-*-cluster/robosystems-dagster-webserver-*
+
+          - Sid: OperationalSecrets
+            Effect: Allow
+            Action: secretsmanager:GetSecretValue
+            Resource:
+              - !Sub arn:${AWS::Partition}:secretsmanager:*:${AWS::AccountId}:secret:robosystems/*/postgres-??????
+              - !Sub arn:${AWS::Partition}:secretsmanager:*:${AWS::AccountId}:secret:robosystems/*/admin-??????
+
+          - Sid: FlipFlagsAndTuning
+            Effect: Allow
+            Action: ssm:PutParameter
+            Resource:
+              - !Sub arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/robosystems/*/features/*
+              - !Sub arn:${AWS::Partition}:ssm:*:${AWS::AccountId}:parameter/robosystems/*/tuning/*
+
+          # Named here rather than left to ReadOnlyAccess, so the reviews do
+          # not depend on what AWS puts in the managed policy.
+          - Sid: ReviewQueries
+            Effect: Allow
+            Action:
+              - aps:QueryMetrics
+              - aps:GetLabels
+              - aps:GetSeries
+              - aps:GetMetricMetadata
+              - logs:StartQuery
+              - logs:StopQuery
+              - logs:GetQueryResults
+              - ce:Get*
+            Resource: "*"
+
+          - !If
+            - AllowAthena
+            - Sid: CostQueries
+              Effect: Allow
+              Action:
+                - athena:StartQueryExecution
+                - athena:StopQueryExecution
+              Resource: !Sub arn:${AWS::Partition}:athena:*:${AWS::AccountId}:workgroup/${AthenaWorkgroup}
+            - !Ref AWS::NoValue
+
+          - !If
+            - AllowAthena
+            - Sid: CostQueryResults
+              Effect: Allow
+              Action:
+                - s3:PutObject
+                - s3:AbortMultipartUpload
+              Resource: !Sub arn:${AWS::Partition}:s3:::${AthenaResultsLocation}*
+            - !Ref AWS::NoValue
+
+          # Explicit denies hold even if AWS widens ReadOnlyAccess later.
+          - Sid: NoOtherSecrets
+            Effect: Deny
+            Action:
+              - secretsmanager:GetSecretValue
+              - secretsmanager:BatchGetSecretValue
+            NotResource:
+              - !Sub arn:${AWS::Partition}:secretsmanager:*:${AWS::AccountId}:secret:robosystems/*/postgres-??????
+              - !Sub arn:${AWS::Partition}:secretsmanager:*:${AWS::AccountId}:secret:robosystems/*/admin-??????
+
+          - Sid: NoCustomerObjects
+            Effect: Deny
+            Action:
+              - s3:GetObject
+              - s3:GetObjectVersion
+            Resource:
+              - !Sub arn:${AWS::Partition}:s3:::robosystems-*user-*/*
+              - !Sub arn:${AWS::Partition}:s3:::robosystems-audit-*/*
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: SSO
+
+  # ===========================================================================
+  # AUDITOR - look, never touch, no data
+  # ===========================================================================
+  # Configuration and security posture only: SecurityAudit reads the settings
+  # an assessment needs, ViewOnlyAccess lists resources. Neither reads object
+  # contents, table items, log events or secrets.
+  AuditorPermissionSet:
+    Type: AWS::SSO::PermissionSet
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      Name: !Sub ${ServiceTag}Auditor
+      Description: Security posture and resource inventory, no data access
+      SessionDuration: !Ref AuditorSessionDuration
+      ManagedPolicies:
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/SecurityAudit
+        - !Sub arn:${AWS::Partition}:iam::aws:policy/job-function/ViewOnlyAccess
+      Tags:
+        - Key: Service
+          Value: !Ref ServiceTag
+        - Key: Component
+          Value: SSO
+
+  OperatorAssignment:
+    Type: AWS::SSO::Assignment
+    Condition: AssignOperator
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      PermissionSetArn: !GetAtt OperatorPermissionSet.PermissionSetArn
+      PrincipalId: !Ref OperatorPrincipalId
+      PrincipalType: !Ref OperatorPrincipalType
+      TargetId: !Ref AWS::AccountId
+      TargetType: AWS_ACCOUNT
+
+  AuditorAssignment:
+    Type: AWS::SSO::Assignment
+    Condition: AssignAuditor
+    Properties:
+      InstanceArn: !Ref InstanceArn
+      PermissionSetArn: !GetAtt AuditorPermissionSet.PermissionSetArn
+      PrincipalId: !Ref AuditorPrincipalId
+      PrincipalType: !Ref AuditorPrincipalType
+      TargetId: !Ref AWS::AccountId
+      TargetType: AWS_ACCOUNT
+
+Outputs:
+  OperatorPermissionSetArn:
+    Value: !GetAtt OperatorPermissionSet.PermissionSetArn
+    Export:
+      Name: !Sub ${AWS::StackName}-OperatorPermissionSetArn
+
+  OperatorPermissionSetName:
+    Value: !Sub ${ServiceTag}Operator
+
+  AuditorPermissionSetArn:
+    Value: !GetAtt AuditorPermissionSet.PermissionSetArn
+    Export:
+      Name: !Sub ${AWS::StackName}-AuditorPermissionSetArn
+
+  AuditorPermissionSetName:
+    Value: !Sub ${ServiceTag}Auditor

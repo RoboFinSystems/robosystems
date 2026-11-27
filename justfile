@@ -302,13 +302,17 @@ serve *args="":
 
 ## Bootstrap ##
 
-# Bootstrap AWS OIDC federation for GitHub Actions
-bootstrap profile="robosystems-sso" region="us-east-1":
+# Bootstrap AWS OIDC federation for GitHub Actions (admin profile: robosystems-admin by default)
+bootstrap profile="" region="us-east-1":
     @bin/setup/bootstrap.sh "{{profile}}" "{{region}}"
 
 # Re-apply the GitHub OIDC stack only — previews the change set, asks before applying
-bootstrap-oidc profile="robosystems-sso" region="us-east-1":
+bootstrap-oidc profile="" region="us-east-1":
     @bin/setup/bootstrap.sh --oidc "{{profile}}" "{{region}}"
+
+# Install or update the daily SSO permission sets and split the CLI profiles — previews the change set, asks before applying
+bootstrap-sso profile="" region="us-east-1":
+    @bin/setup/bootstrap-sso.sh "{{profile}}" "{{region}}"
 
 # AWS setup (Secrets Manager + SSM Parameter Store)
 setup-aws:
