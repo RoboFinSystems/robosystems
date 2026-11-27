@@ -199,6 +199,8 @@ class LadybugConnectionPool:
     recreated by then, that is the new database's WAL: its writes stay
     readable and are lost at the next restart. So nothing may outlive this.
     """
+    # `_connections` is private to the engine's Python package. If an upgrade
+    # renames it this loop does nothing; test_delete_recreate_durability fails.
     for connection in list(getattr(db, "_connections", ())):
       try:
         connection.close()
