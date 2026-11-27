@@ -340,7 +340,7 @@
       "type": "pickString",
       "description": "Choose environment:",
       "default": "prod",
-      "options": ["prod", "staging", "dev", "shared", "local"]
+      "options": ["prod", "staging", "dev"]
     },
     {
       "id": "profileDocker",
@@ -359,6 +359,7 @@
         "seaweedfs",
         "dynamodb",
         "mailpit",
+        "opensearch",
         "api",
         "observability",
         "roboledger-app",
@@ -383,6 +384,7 @@
         "seaweedfs",
         "dynamodb",
         "mailpit",
+        "opensearch",
         "dagster-webserver",
         "dagster-daemon"
       ]
