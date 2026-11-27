@@ -164,6 +164,7 @@ class TestRunImport:
 
     assert result["tables"][0]["stage"] == "staging"
     client.materialize_table.assert_not_awaited()
+    client.delete_table.assert_awaited_once_with(GRAPH, "Person")
 
   @pytest.mark.unit
   @pytest.mark.asyncio

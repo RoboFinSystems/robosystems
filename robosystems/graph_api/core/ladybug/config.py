@@ -76,7 +76,12 @@ def subgraph_share_mb(tier_config: dict, subgraph_count: int) -> int | None:
 
 def count_subgraph_databases(database_name: str) -> int:
   """The subgraph databases on this node, counting ``database_name`` whether or
-  not its file exists yet (it is sized as it is created)."""
+  not its file exists yet (it is sized as it is created).
+
+  A subgraph is a name with an underscore, the rule the rest of this package
+  uses. Every one on the node counts against the one budget, which is right
+  for the tiers that set a budget: they hold a single parent.
+  """
   from pathlib import Path
 
   from robosystems.config.storage.graph import split_graph_db_filename

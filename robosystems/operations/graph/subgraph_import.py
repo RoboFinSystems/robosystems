@@ -104,6 +104,15 @@ def _order_nodes_first(
   ), missing
 
 
+async def _drop_staging(client: Any, graph_id: str, table_name: str) -> None:
+  """The staging table is scratch: left behind, the next import of this table
+  would copy this file's rows again."""
+  try:
+    await client.delete_table(graph_id, table_name)
+  except Exception as exc:
+    logger.warning(f"Could not drop staging table {graph_id}.{table_name}: {exc}")
+
+
 async def run_import(
   *,
   graph_id: str,
@@ -115,10 +124,12 @@ async def run_import(
   """Copy each uploaded file into its table, node tables first.
 
   Returns one result per table handled and, under ``remaining``, the tables
-  the time budget did not reach. Calling again with ``remaining`` continues;
+  the time budget did not reach. The budget is checked between tables, so a
+  table once started is finished: one large file can outrun it. Calling again with ``remaining`` continues;
   repeating a table is safe, since the copy skips rows already present.
   """
   from robosystems.graph_api.client.factory import GraphClientFactory
+  from robosystems.middleware.operations import run_off_loop
   from robosystems.operations.aws.s3 import S3Client
 
   names = _check_table_names(tables)
@@ -149,7 +160,7 @@ async def run_import(
         break
 
       key = import_key(user_id, graph_id, import_id, name)
-      if not s3.object_exists(bucket, key):
+      if not await run_off_loop(s3.object_exists, bucket, key):
         results.append(
           {
             "table_name": name,
@@ -172,6 +183,7 @@ async def run_import(
             "message": str(staged.get("error") or "The file could not be read."),
           }
         )
+        await _drop_staging(client, graph_id, name)
         continue
 
       try:
@@ -196,12 +208,7 @@ async def run_import(
           }
         )
       finally:
-        # The staging table is scratch: left behind, the next import of this
-        # table would copy this file's rows again.
-        try:
-          await client.delete_table(graph_id, name)
-        except Exception as exc:
-          logger.warning(f"Could not drop staging table {graph_id}.{name}: {exc}")
+        await _drop_staging(client, graph_id, name)
   finally:
     await client.close()
 

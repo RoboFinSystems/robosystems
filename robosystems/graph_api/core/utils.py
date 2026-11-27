@@ -47,6 +47,10 @@ def validate_query_parameters(params: dict[str, Any] | None) -> None:
   The limits bound how much work a single request can force the engine to do;
   nested dictionaries are validated recursively. Raises ``HTTPException`` on
   a violation.
+
+  The MCP client passes these messages through to the caller by their wording
+  (``_REQUEST_LIMIT_ERROR`` in ``middleware/mcp/client.py``); change the two
+  together.
   """
   if not params:
     return
