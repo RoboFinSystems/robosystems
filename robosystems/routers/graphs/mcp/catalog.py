@@ -57,9 +57,12 @@ from .remote import (
 
 graphs_router = APIRouter()
 
-# A reference the model passes as `graph`: an id or an alias.
-_GRAPH_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+# A reference the model passes as `graph`: an id or an alias. Matched whole
+# (`fullmatch`): `$` alone also matches before a trailing newline.
+_GRAPH_REF = re.compile(r"[A-Za-z0-9][A-Za-z0-9_-]{0,63}")
 _READ_ONLY_SUFFIX = ":ro"
+_SCOPE_SETTINGS = ("graphs", "read_only")
+DELETE_SUBGRAPH = "delete-subgraph"
 
 SUMMARY_CHARS = 180
 MAX_DEFINITIONS = 8
@@ -220,7 +223,7 @@ class ConnectionScope:
 
   def resolve(self, ref: Any) -> str:
     """The graph id for the model's ``graph`` argument, or a refusal."""
-    if not isinstance(ref, str) or not _GRAPH_REF.match(ref):
+    if not isinstance(ref, str) or not _GRAPH_REF.fullmatch(ref):
       raise _Refusal("`graph` must be a graph id or alias from `list-graphs`")
     graph_id = ref
     if self.entries:
@@ -232,7 +235,7 @@ class ConnectionScope:
           f'Graph "{ref}" is outside this connection. It reaches: {reach}, '
           "and their subgraphs"
         )
-    if not re.match(graph_types.GRAPH_OR_SUBGRAPH_ID_PATTERN, graph_id):
+    if not _is_graph_id(graph_id):
       raise _Refusal(
         f'"{ref}" is not a graph id. `list-graphs` returns the ids this '
         "connection reaches."
@@ -243,6 +246,10 @@ class ConnectionScope:
     return self.read_only or any(
       e.read_only and _covers(e.graph_id, graph_id) for e in self.entries
     )
+
+
+def _is_graph_id(value: str) -> bool:
+  return re.fullmatch(graph_types.GRAPH_OR_SUBGRAPH_ID_PATTERN, value) is not None
 
 
 def _covers(entry_graph_id: str, graph_id: str) -> bool:
@@ -279,8 +286,8 @@ def parse_connection_scope(
       alias, eq, graph_id = pair.rpartition("=")
       alias = alias.strip() if eq else None
       graph_id = graph_id.strip()
-      if not re.match(graph_types.GRAPH_OR_SUBGRAPH_ID_PATTERN, graph_id) or (
-        alias is not None and not _GRAPH_REF.match(alias)
+      if not _is_graph_id(graph_id) or (
+        alias is not None and not _GRAPH_REF.fullmatch(alias)
       ):
         raise ValueError(
           f'graphs: "{item}" is not a graph id or alias=id pair '
@@ -295,14 +302,31 @@ def parse_connection_scope(
     aliases = {e.alias for e in entries if e.alias}
     if len(aliases) != sum(1 for e in entries if e.alias):
       raise ValueError("graphs: an alias is used twice")
-    clash = aliases & seen
+    # An alias is looked up before an id, so one that reads as a configured
+    # graph or its subgraph would send that id's calls to another graph.
+    clash = sorted(a for a in aliases if any(_covers(g, a) for g in seen))
     if clash:
-      raise ValueError(f'graphs: alias "{sorted(clash)[0]}" is also a graph id')
+      raise ValueError(
+        f'graphs: alias "{clash[0]}" is also a configured graph or its subgraph'
+      )
   return ConnectionScope(tuple(entries), flag in ("true", "1"))
 
 
 def get_connection_scope(request: Request) -> ConnectionScope:
+  """The connection's settings, off the URL. A setting this route does not
+  know, or one given twice, is refused: a misspelt ``read_only`` must not
+  leave a connection that writes."""
   try:
+    names = [name for name, _ in request.query_params.multi_items()]
+    unknown = sorted(set(names) - set(_SCOPE_SETTINGS))
+    if unknown:
+      raise ValueError(
+        f'"{unknown[0]}" is not a setting of this endpoint; it takes '
+        + " and ".join(_SCOPE_SETTINGS)
+      )
+    for name in _SCOPE_SETTINGS:
+      if names.count(name) > 1:
+        raise ValueError(f"{name} is set more than once")
     return parse_connection_scope(
       request.query_params.get("graphs"), request.query_params.get("read_only")
     )
@@ -671,10 +695,20 @@ async def _call_graph_tool(
       text = f'"{name}" is a read tool: call it with `{CALL_READ_TOOL}`.'
     return _tool_error_result(msg_id, text)
 
+  arguments = args.get("arguments")
+  # The one write that lands on another graph: a parent removing a subgraph
+  # the connection holds read-only.
+  if name == DELETE_SUBGRAPH and isinstance(arguments, dict):
+    target = arguments.get("subgraph_id")
+    if isinstance(target, str) and scope.writes_withheld(target):
+      return _tool_error_result(
+        msg_id, f"Graph {target} is read-only on this connection."
+      )
+
   # From here it is an ordinary tools/call on the graph: authorization, write
   # classification, the breaker, streaming and audit all run as they do on
   # the per-graph route.
-  params: dict[str, Any] = {"name": name, "arguments": args.get("arguments") or {}}
+  params: dict[str, Any] = {"name": name, "arguments": arguments or {}}
   if meta is not None:
     params["_meta"] = meta
   return await _handle_tools_call(request, graph_id, current_user, msg_id, params)
@@ -718,23 +752,25 @@ async def _handle_catalog_call(
   except _Refusal as refusal:
     return _tool_error_result(msg_id, str(refusal))
 
-  if name == GET_TOOLS:
-    try:
+  # The rate limit is already charged, so a refusal from here is the graph's
+  # own (a suspended graph, an ended trial, a backend that is away) and the
+  # model is told as a tool error.
+  try:
+    if name == GET_TOOLS:
       return await _get_tools(msg_id, graph_id, current_user, scope, args)
-    except HTTPException as e:
-      # The graph refused the read (a suspended graph, an ended trial).
-      detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
-      return _tool_error_result(msg_id, detail)
-  return await _call_graph_tool(
-    request,
-    msg_id,
-    graph_id,
-    current_user,
-    scope,
-    args,
-    params.get("_meta"),
-    want_read=name == CALL_READ_TOOL,
-  )
+    return await _call_graph_tool(
+      request,
+      msg_id,
+      graph_id,
+      current_user,
+      scope,
+      args,
+      params.get("_meta"),
+      want_read=name == CALL_READ_TOOL,
+    )
+  except HTTPException as e:
+    detail = e.detail if isinstance(e.detail, str) else json.dumps(e.detail)
+    return _tool_error_result(msg_id, detail)
 
 
 async def dispatch_catalog_jsonrpc(

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 from fastapi import HTTPException
+from starlette.datastructures import QueryParams
 
 from robosystems.routers.graphs.mcp import catalog
 from robosystems.routers.graphs.mcp.catalog import (
@@ -159,7 +160,10 @@ class TestConnectionScope:
     with pytest.raises(catalog._Refusal):
       scope.resolve(KG + "ff")
 
-  @pytest.mark.parametrize("ref", ["", "../kg1", "kg1/..", "a b", None, 5, "x" * 80])
+  @pytest.mark.parametrize(
+    "ref",
+    ["", "../kg1", "kg1/..", "a b", None, 5, "x" * 80, KG + "\n", f"{KG}_dev\n"],
+  )
   def test_an_unsafe_reference_is_refused(self, ref):
     with pytest.raises(catalog._Refusal):
       EVERY_GRAPH.resolve(ref)
@@ -175,7 +179,15 @@ class TestConnectionScope:
 
   @pytest.mark.parametrize(
     "graphs",
-    ["", " , ", "not-a-graph", f"bad alias={KG}", f"a={KG},a={KG2}", f"sec={KG},sec"],
+    [
+      "",
+      " , ",
+      "not-a-graph",
+      f"bad alias={KG}",
+      f"a={KG},a={KG2}",
+      f"sec={KG},sec",
+      f"{KG},{KG}_dev={KG2}",
+    ],
   )
   def test_a_malformed_setting_never_widens_the_connection(self, graphs):
     with pytest.raises(ValueError):
@@ -185,12 +197,32 @@ class TestConnectionScope:
     with pytest.raises(ValueError):
       parse_connection_scope(None, "yes please")
 
-  def test_a_bad_setting_on_the_url_is_a_400(self):
+  @pytest.mark.parametrize(
+    "query",
+    [
+      "graphs=nope",
+      "readonly=true",
+      f"graph={KG}",
+      f"graphs={KG}&token=x",
+      "read_only=true&read_only=false",
+      f"graphs={KG}&graphs={KG2}",
+    ],
+  )
+  def test_a_bad_setting_on_the_url_is_a_400(self, query):
     request = Mock()
-    request.query_params = {"graphs": "nope"}
+    request.query_params = QueryParams(query)
     with pytest.raises(HTTPException) as exc:
       catalog.get_connection_scope(request)
     assert exc.value.status_code == 400
+
+  def test_the_settings_are_read_off_the_url(self):
+    request = Mock()
+    request.query_params = QueryParams(f"graphs=books={KG},sec:ro&read_only=true")
+    scope = catalog.get_connection_scope(request)
+    assert scope.read_only
+    assert [e.graph_id for e in scope.entries] == [KG, "sec"]
+    request.query_params = QueryParams("")
+    assert catalog.get_connection_scope(request) == ConnectionScope()
 
 
 @pytest.mark.asyncio
@@ -511,6 +543,35 @@ class TestCallTool:
         _call(CALL_WRITE_TOOL, {"graph": KG2, "name": "create-subgraph"}), scope
       )
       gate.tools_call.assert_awaited_once()
+
+  async def test_a_parent_cannot_delete_a_read_only_subgraph(self):
+    scope = parse_connection_scope(f"{KG},{KG}_dev:ro", None)
+
+    def delete(subgraph_id):
+      return _call(
+        CALL_WRITE_TOOL,
+        {
+          "graph": KG,
+          "name": "delete-subgraph",
+          "arguments": {"subgraph_id": subgraph_id},
+        },
+      )
+
+    with _Gate() as gate:
+      response = await _dispatch(delete(f"{KG}_dev"), scope)
+      assert "read-only on this connection" in _text(response)
+      gate.tools_call.assert_not_awaited()
+      await _dispatch(delete(f"{KG}_test"), scope)
+      gate.tools_call.assert_awaited_once()
+
+  async def test_a_refusal_by_the_graph_is_a_tool_error(self):
+    with _Gate() as gate:
+      gate.tools_call.side_effect = HTTPException(status_code=503, detail="away")
+      response = await _dispatch(
+        _call(CALL_READ_TOOL, {"graph": KG, "name": "get-graph-schema"})
+      )
+    assert _body(response)["result"]["isError"] is True
+    assert _text(response) == "away"
 
   async def test_a_read_only_connection_refuses_the_write_tool_outright(self):
     with _Gate() as gate:
