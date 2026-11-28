@@ -307,6 +307,8 @@ Two query parameters narrow a connection. Both are settings of the connection, n
 - `graphs` limits it to named graphs and their subgraphs, as a comma-separated list of graph ids. An entry can carry an alias (`books=kg1a2b…`), which the model can pass as `graph`, and a `:ro` suffix, which withholds that graph's write tools: `?graphs=books=kg1a2b…,sec:ro`
 - `read_only=true` withholds every write tool: `call-write-tool` is not listed and cannot be called
 
+Any other query parameter, or one of these given twice, is a `400`: a misspelt setting never leaves a wider connection than the one asked for.
+
 #### The RoboLedger route
 
 `/v1/mcp/roboledger` serves a RoboLedger tenant graph's full catalog minus what a chat client cannot use or should not drive. It withholds the subgraph tools (`write-graph-cypher`, `add-node-table`, `add-relationship-table`, `create-table-import`, `run-table-import`), the workspace administration tools (`create-subgraph`, `delete-subgraph`, `list-subgraphs`, `create-backup`, `materialize`), `get-report-bundle` (its credentialed link has nowhere to go but the transcript), `set-write-policy` (QuickBooks write-back is an owner decision made in the app), `rebuild-schedule` and `backfill-plan-history` (maintenance, not the close), and `delete-taxonomy-block`. Everything else a tenant connection serves, the route serves the same way: the event blocks with every event kind, the handlers that post them, and the GraphQL pair. It is an exclusion list, so a new ledger tool appears on the route by default. A withheld tool is absent from `tools/list` and refused on call (`Tool '<name>' is not available on this connection.`); the per-graph and universal routes serve it.
